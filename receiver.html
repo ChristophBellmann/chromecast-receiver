@@ -12,7 +12,7 @@
         width:100%; height:100%;
         background:black; overflow:hidden;
       }
-      /* 1) cheese wheel canvas, over splash */
+      /* 1) rotating cheese wheel canvas, over splash */
       #cheeseCanvas {
         position:absolute; inset:0;
         z-index:11;
@@ -57,6 +57,9 @@
         background:white; color:black; border:none;
         padding:0.5em 1em; font-size:1em;
       }
+      #menu button:focus {
+        outline:2px solid #0af;
+      }
       /* 6) info overlay */
       #info {
         position:absolute; bottom:5%; left:5%;
@@ -66,7 +69,7 @@
       }
     </style>
   </head>
-  <body>
+  <body tabindex="0">
     <!-- 1) cheese wheel -->
     <canvas id="cheeseCanvas"></canvas>
 
@@ -92,7 +95,12 @@
     <div id="info"></div>
 
     <script>
-      // === rotating cheese wheel & timer (1 rotation per 5 seconds) ===
+      // Force focus so keydown events fire
+      window.addEventListener('load', () => {
+        document.body.focus();
+      });
+
+      // === rotating cheese wheel & timer (1 rotation per 5s) ===
       const canvas = document.getElementById('cheeseCanvas');
       const ctx    = canvas.getContext('2d');
       function resizeCanvas() {
@@ -115,7 +123,7 @@
         // time delta
         const deltaS = (ts - lastTs) / 1000;
         lastTs = ts;
-        // **one full rotation per 5 seconds** → (2π rad) / 5s
+        // one full rotation per 5 seconds → (2π rad) / 5
         angle = (angle + deltaS * (2 * Math.PI / 5)) % (2 * Math.PI);
 
         // draw
@@ -133,7 +141,6 @@
         ctx.lineWidth   = r*0.05;
         ctx.strokeStyle = '#1155aa';
         ctx.stroke();
-        // holes
         for (let i=0; i<12; i++){
           const t  = (i/12)*2*Math.PI;
           const hr = r*(0.2+0.1*Math.random());
@@ -156,7 +163,7 @@
       const mgr       = context.getPlayerManager();
       const options   = new cast.framework.CastReceiverOptions();
       options.disableIdleTimeout = true;
-      const cfg = mgr.getPlaybackConfig();
+      const cfg       = mgr.getPlaybackConfig();
       cfg.autoResumeNumberOfSegments = 1;
       mgr.setPlaybackConfig(cfg);
       mgr.setMessageInterceptor(
@@ -177,15 +184,15 @@
       let idx      = 0;
 
       document.addEventListener('keydown', e => {
-        if (e.key==='ArrowUp'||e.key==='ArrowDown') {
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
           menu.style.display = 'flex';
           idx = 0; items[idx].focus();
           e.preventDefault();
-        } else if (menu.style.display==='flex') {
-          if (e.key==='ArrowLeft')      idx = (idx+items.length-1)%items.length;
-          else if (e.key==='ArrowRight') idx = (idx+1)%items.length;
-          else if (e.key==='Enter')      items[idx].click();
-          else if (e.key==='Escape')     menu.style.display='none';
+        } else if (menu.style.display === 'flex') {
+          if (e.key === 'ArrowLeft')      idx = (idx + items.length - 1) % items.length;
+          else if (e.key === 'ArrowRight') idx = (idx + 1) % items.length;
+          else if (e.key === 'Enter')      items[idx].click();
+          else if (e.key === 'Escape')     menu.style.display = 'none';
           items[idx].focus();
           e.preventDefault();
         }
@@ -193,21 +200,21 @@
 
       document.getElementById('menu-stream').addEventListener('click', () => {
         bus.send({type:'start'});
-        document.getElementById('splash').style.display='none';
-        menu.style.display='none';
+        document.getElementById('splash').style.display = 'none';
+        menu.style.display = 'none';
       });
       document.getElementById('menu-about').addEventListener('click', () => {
         const now = new Date().toLocaleTimeString();
         infoEl.textContent =
           `Hi Linda!\nHier ist ein selbstgebauter Player.\nLieben Gruß, Christoph\n\nLocal Time: ${now}`;
-        infoEl.style.display='block';
-        setTimeout(()=>infoEl.style.display='none',5000);
-        menu.style.display='none';
+        infoEl.style.display = 'block';
+        setTimeout(() => infoEl.style.display = 'none', 5000);
+        menu.style.display = 'none';
       });
 
       setTimeout(() => {
         bus.send({type:'start'});
-        document.getElementById('splash').style.display='none';
+        document.getElementById('splash').style.display = 'none';
       }, 20000);
     </script>
   </body>
