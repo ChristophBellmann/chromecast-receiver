@@ -2,192 +2,164 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Low-Latency Receiver v0.1</title>
-    <!-- 1) Load the Web Receiver SDK -->
-    <script src="https://www.gstatic.com/cast/sdk/libs/receiver/2.0.0/cast_receiver.js"></script>
+    <title>Low-Latency Receiver</title>
+    <!-- 1) Core CAF Receiver SDK v3 -->
+    <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+    <!-- 2) D-Pad TV Controls (manual include for built-in TVs) -->
+    <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework_controls_dpad_tv.js"></script>
     <style>
       html, body {
         margin: 0; padding: 0;
         width: 100%; height: 100%;
-        background: black; overflow: hidden;
+        background: black;
       }
-
-      /* 2) Full-screen cast player with custom splash */
-      cast-media-player {
-        width:100%; height:100%;
-        /* Your PNG will show automatically until playback starts */
-        --media-background-color: black;
-        --media-splash-image: url('https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png');
-        --media-splash-image-size: contain;
-        --media-splash-image-position: center center;
-        /* Hide the default yellow progress bar */
-        --media-control-bar-display: none;
+      /* Splash screen */
+      #splash {
+        position: absolute; top: 0; left: 0;
+        width: 100%; height: 100%;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        background: black; z-index: 10;
       }
-
-      /* 3) Overlay menu (hidden by default) */
+      #splash img { max-width: 80%; }
+      #splash #version {
+        color: white; margin-top: 1em;
+        font-size: 1.2em;
+      }
+      /* Hidden menu overlay */
       #menu {
-        position: absolute;
-        top: 40%; left: 50%;
-        transform: translate(-50%, -50%);
+        position: absolute; top: 10%; left: 50%;
+        transform: translateX(-50%);
         display: none;
-        gap: 2rem;
-        z-index: 10;
+        background: rgba(0,0,0,0.7);
+        padding: 1em; border-radius: 8px;
+        z-index: 20;
+        display: flex; gap: 1em;
       }
       #menu button {
-        font-size: 2rem;
-        padding: 1rem 2rem;
-        background: rgba(255,255,255,0.1);
-        border: 2px solid white;
-        color: white;
+        background: white; color: black;
+        border: none; padding: 0.5em 1em;
+        font-size: 1em;
       }
-      #menu button:focus {
-        outline: 3px solid #0af;
-      }
-
-      /* 4) About & Info dialogs */
-      .dialog {
-        position: absolute;
-        top: 50%; left: 50%;
-        transform: translate(-50%, -50%);
-        background: rgba(0,0,0,0.8);
-        color: white;
-        padding: 2rem;
-        border-radius: 8px;
-        display: none;
+      /* Info overlay */
+      #info {
+        position: absolute; bottom: 5%; left: 5%;
+        padding: 1em;
+        background: rgba(0,0,0,0.7);
+        color: white; font-size: 0.9em;
+        display: none; white-space: pre-line;
         z-index: 20;
-        text-align: center;
-        max-width: 80%;
       }
-      .dialog pre {
-        text-align: left;
-        font-family: monospace;
+      /* Full-screen player */
+      cast-media-player {
+        width: 100%; height: 100%;
+        position: absolute; top: 0; left: 0;
       }
-      .dialog button {
-        margin-top: 1rem;
-        font-size: 1.2rem;
-        padding: 0.5rem 1rem;
+      /* Hide built-in controls */
+      .media-controls,
+      .progress-bar,
+      .seek-bar,
+      .control-bar {
+        display: none !important;
       }
     </style>
   </head>
   <body>
-    <!-- 5) The SDK-managed player -->
+    <!-- Splash -->
+    <div id="splash">
+      <img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Loading">
+      <div id="version">v0.1</div>
+    </div>
+    <!-- Built-in CAF player -->
     <cast-media-player id="player"></cast-media-player>
-
-    <!-- 6) Menu & dialogs -->
+    <!-- Custom menu -->
     <div id="menu">
-      <button id="stream">Stream</button>
-      <button id="about">About</button>
-      <button id="info">Info</button>
+      <button id="menu-stream">Stream</button>
+      <button id="menu-about">About</button>
     </div>
-
-    <div id="aboutDlg" class="dialog">
-      <h2>Low-Latency Receiver</h2>
-      <p>Hi Linda! Hier ist ein selbstgebauter Player.<br/>Lieben Gruß, Christoph</p>
-      <button id="closeAbout">Close</button>
-    </div>
-
-    <div id="infoDlg" class="dialog">
-      <h2>Info</h2>
-      <pre id="stats">
-Ping: -- ms
-Delay: -- s
-Video: --×--
-Audio: AAC 192 kbps, Stereo
-      </pre>
-      <button id="closeInfo">Close</button>
-    </div>
+    <!-- About/info overlay -->
+    <div id="info"></div>
 
     <script>
-      const context       = cast.framework.CastReceiverContext.getInstance();
-      const options       = new cast.framework.CastReceiverOptions();
-      // 7) Support ALL basic media commands so ▲/▼, ◀/▶, Play/Pause, Seek, Volume, Back all work
-      options.supportedCommands = cast.framework.messages.Command.ALL_BASIC_MEDIA;
-      options.disableIdleTimeout = true;
-      context.setOptions(options);
-
+      // Initialize CAF
+      const context = cast.framework.CastReceiverContext.getInstance();
       const playerManager = context.getPlayerManager();
-      const player        = document.getElementById('player');
+      const options = new cast.framework.CastReceiverOptions();
+      options.disableIdleTimeout = true;
 
-      // Quick refs
-      const menu     = document.getElementById('menu');
-      const aboutDlg = document.getElementById('aboutDlg');
-      const infoDlg  = document.getElementById('infoDlg');
-      let streamTs;
-
-      // Show/Hide helpers
-      function showMenu()   { menu.style.display = 'flex'; menu.firstElementChild.focus(); }
-      function hideMenu()   { menu.style.display = 'none'; }
-      function hideAll()    { hideMenu(); aboutDlg.style.display = ''; infoDlg.style.display = ''; }
-
-      // 8) When the user hits ▲/▼ (volume), Pause, or Seek, show the menu
-      playerManager.addEventListener(
-        cast.framework.events.EventType.VOLUME_CHANGED, showMenu
+      // Low-latency sync: resume after 1 segment
+      const cfg = Object.assign(
+        new cast.framework.PlaybackConfig(),
+        playerManager.getPlaybackConfig()
       );
-      playerManager.addEventListener(
-        cast.framework.events.EventType.PLAYER_STATE_CHANGED,
-        e => {
-          if (e.state === 'PAUSED' || e.state === 'IDLE') showMenu();
-        }
-      );
-      playerManager.addEventListener(
-        cast.framework.events.EventType.SEEKED, showMenu
-      );
+      cfg.autoResumeNumberOfSegments = 1;
+      playerManager.setPlaybackConfig(cfg);
 
-      // 9) Button actions
-      document.getElementById('stream').onclick = () => {
-        hideAll();
-        playerManager.play();
-      };
-      document.getElementById('about').onclick = () => {
-        aboutDlg.style.display = 'block';
-        document.getElementById('closeAbout').focus();
-      };
-      document.getElementById('closeAbout').onclick = () => {
-        aboutDlg.style.display = '';
-        showMenu();
-      };
-
-      document.getElementById('info').onclick = () => {
-        // gather stats
-        const now = new Date();
-        let txt = `Local Time: ${now.toLocaleTimeString()}\n`;
-        // ping HEAD
-        const url = playerManager.getMediaInformation().contentId;
-        fetch(url, {method:'HEAD'}).then(()=>{
-          txt = `Ping: ${Date.now()} ms\n` + txt;
-        }).catch(()=>{
-          txt = `Ping: N/A\n` + txt;
-        }).finally(()=>{
-          const status = playerManager.getMediaStatus();
-          txt += `Delay: ${status.streamPosition.toFixed(1)} s\n`;
-          txt += `Video: ${status.media.metadata.width}×${status.media.metadata.height}\n`;
-          txt += `Audio: AAC 192 kbps, Stereo\n`;
-          document.getElementById('stats').textContent = txt;
-          infoDlg.style.display = 'block';
-          document.getElementById('closeInfo').focus();
-        });
-      };
-      document.getElementById('closeInfo').onclick = () => {
-        infoDlg.style.display = '';
-        showMenu();
-      };
-
-      // 10) Timestamp sync on LOAD
+      // Force autoplay
       playerManager.setMessageInterceptor(
         cast.framework.messages.MessageType.LOAD,
-        loadRequestData => {
-          const u = new URL(loadRequestData.media.contentId);
-          const ts = parseInt(u.searchParams.get('ts'), 10);
-          if (!isNaN(ts)) {
-            streamTs = ts;
-            loadRequestData.currentTime = (Date.now() - ts)/1000;
-          }
-          return loadRequestData;
-        }
+        data => { data.autoplay = true; return data; }
       );
 
-      // 11) Start the receiver
-      context.start();
+      context.start(options);
+
+      // Hide splash when first load completes
+      playerManager.addEventListener(
+        cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
+        () => { document.getElementById('splash').style.display = 'none'; }
+      );
+
+      // Menu handling
+      const menu = document.getElementById('menu');
+      const items = Array.from(menu.querySelectorAll('button'));
+      let idx = 0;
+      document.addEventListener('keydown', e => {
+        // Open menu on Up/Down
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+          e.preventDefault();
+          menu.style.display = 'flex';
+          idx = 0;
+          items[idx].focus();
+        }
+        // Navigate/select within menu
+        else if (menu.style.display === 'flex') {
+          if (e.key === 'ArrowLeft') {
+            idx = (idx - 1 + items.length) % items.length;
+            items[idx].focus();
+          } else if (e.key === 'ArrowRight') {
+            idx = (idx + 1) % items.length;
+            items[idx].focus();
+          } else if (e.key === 'Enter') {
+            items[idx].click();
+          } else if (e.key === 'Escape') {
+            menu.style.display = 'none';
+            document.getElementById('player').focus();
+          }
+        }
+      });
+
+      // Stream: just close menu
+      document.getElementById('menu-stream')
+              .addEventListener('click', () => { menu.style.display = 'none'; });
+
+      // About: show info overlay
+      document.getElementById('menu-about')
+              .addEventListener('click', () => {
+        const info = document.getElementById('info');
+        const now = new Date();
+        const mediaInfo = playerManager.getMediaInformation() || {};
+        const stats = playerManager.getStats();
+        info.textContent =
+          'Hi Linda! Hier ist ein selbstgebauter Player. Lieben Gruß, Christoph\n' +
+          `Time: ${now.toLocaleTimeString()}\n` +
+          `Delay: ${stats.currentMediaTime
+             ? (now.getTime()/1000 - stats.currentMediaTime).toFixed(2) + 's'
+             : 'N/A'}\n` +
+          `Video: ${mediaInfo.metadata?.width || 'N/A'}x${mediaInfo.metadata?.height || 'N/A'}\n` +
+          `Audio: ${mediaInfo.contentType || 'N/A'}`;
+        info.style.display = 'block';
+        menu.style.display = 'none';
+      });
     </script>
   </body>
 </html>
