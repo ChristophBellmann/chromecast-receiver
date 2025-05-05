@@ -5,18 +5,15 @@
     <title>Low-Latency Receiver</title>
     <script src="https://www.gstatic.com/cast/sdk/libs/receiver/2.0.0/cast_receiver.js"></script>
     <style>
-      /* Full-screen black background */
       html, body {
         margin: 0; padding: 0; width: 100%; height: 100%;
         background: black; overflow: hidden;
       }
-      /* The Chromecast player — hidden until LOAD */
       cast-media-player {
         display: none;
         width: 100%; height: 100%;
         position: absolute; top: 0; left: 0;
       }
-      /* Menu overlay */
       #menu {
         position: absolute; top: 40%; left: 50%;
         transform: translate(-50%, -50%);
@@ -24,76 +21,76 @@
         z-index: 1000;
       }
       #menu button {
-        font-size: 2rem;
-        padding: 1rem 2rem;
+        font-size: 2rem; padding: 1rem 2rem;
         background: rgba(255,255,255,0.1);
-        border: 2px solid white;
-        color: white;
+        border: 2px solid white; color: white;
       }
       #menu button:focus {
         outline: 3px solid #0af;
       }
-      /* About box */
       #about {
         position: absolute; top: 50%; left: 50%;
         transform: translate(-50%, -50%);
         background: rgba(0,0,0,0.8);
         color: white; padding: 2rem;
-        border-radius: 8px;
-        display: none;
-        z-index: 1001;
-        max-width: 80%;
-        text-align: center;
+        border-radius: 8px; display: none; z-index: 1001;
+        max-width: 80%; text-align: center;
       }
       #about button {
-        margin-top: 1rem;
-        font-size: 1.2rem;
+        margin-top: 1rem; font-size: 1.2rem;
         padding: 0.5rem 1rem;
       }
     </style>
   </head>
   <body>
-    <!-- Menu -->
     <div id="menu">
       <button id="stream-btn" tabindex="1">Stream</button>
       <button id="about-btn" tabindex="2">About</button>
     </div>
-    <!-- About dialog -->
     <div id="about">
       <h2>Low-Latency Receiver</h2>
       <p>Version 1.0<br/>
-         Use your remote to select “Stream” and then cast from your laptop.</p>
+         Use your remote’s arrows to open the menu at any time.</p>
       <button id="about-close" tabindex="3">Close</button>
     </div>
-    <!-- Cast player -->
     <cast-media-player id="player"></cast-media-player>
 
     <script>
       const context = cast.framework.CastReceiverContext.getInstance();
       const playerManager = context.getPlayerManager();
 
-      // ——— Menu logic ———
-      const menu = document.getElementById('menu');
-      const aboutBox = document.getElementById('about');
-      const buttons = Array.from(menu.querySelectorAll('button'));
+      const menu       = document.getElementById('menu');
+      const aboutBox   = document.getElementById('about');
+      const buttons    = Array.from(menu.querySelectorAll('button'));
       let idx = 0;
-      buttons[idx].focus();
 
+      // Always listen for Up/Down to show menu
       document.body.addEventListener('keydown', e => {
-        if (menu.style.display === 'none') return;
-        if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-          idx = (idx + buttons.length - 1) % buttons.length;
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+          if (menu.style.display === 'none') {
+            menu.style.display = 'flex';
+          }
+          idx = 0;
           buttons[idx].focus();
-        } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-          idx = (idx + 1) % buttons.length;
-          buttons[idx].focus();
-        } else if (e.key === 'Enter' || e.key === ' ') {
-          buttons[idx].click();
+        }
+      });
+
+      // Navigate menu when visible
+      document.body.addEventListener('keydown', e => {
+        if (menu.style.display !== 'none') {
+          if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+            idx = (idx + buttons.length - 1) % buttons.length;
+            buttons[idx].focus();
+          } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+            idx = (idx + 1) % buttons.length;
+            buttons[idx].focus();
+          } else if (e.key === 'Enter' || e.key === ' ') {
+            buttons[idx].click();
+          }
         }
       });
 
       document.getElementById('stream-btn').addEventListener('click', () => {
-        // hide menu; now await the LOAD from your script
         menu.style.display = 'none';
       });
 
@@ -101,55 +98,48 @@
         aboutBox.style.display = 'block';
         document.getElementById('about-close').focus();
       });
+
       document.getElementById('about-close').addEventListener('click', () => {
         aboutBox.style.display = 'none';
         buttons[idx].focus();
       });
 
-      // ——— Sync logic on LOAD ———
+      // Sync on LOAD
       playerManager.setMessageInterceptor(
         cast.framework.messages.MessageType.LOAD,
         loadRequestData => {
-          // hide UI, show player
-          menu.style.display = 'none';
+          menu.style.display   = 'none';
           aboutBox.style.display = 'none';
           document.getElementById('player').style.display = 'block';
-          // force autoplay
           loadRequestData.autoplay = true;
-          // parse ?ts= from contentId URL
           try {
             const url = new URL(loadRequestData.media.contentId);
-            const ts = parseInt(url.searchParams.get('ts'));
+            const ts  = parseInt(url.searchParams.get('ts'));
             if (!isNaN(ts)) {
-              const offset = (Date.now() - ts) / 1000;
-              console.log('Initial sync offset (s):', offset);
-              loadRequestData.currentTime = offset;
+              loadRequestData.currentTime = (Date.now() - ts) / 1000;
             }
-          } catch (err) { /* ignore */ }
+          } catch (e) {}
           return loadRequestData;
         }
       );
 
-      // ——— Re-sync on resume ———
+      // Re-sync on resume
       playerManager.addEventListener(
-        cast.framework.events.EventType.PLAYING,
-        () => {
+        cast.framework.events.EventType.PLAYING, () => {
           const info = playerManager.getMediaInformation();
           if (info && info.contentId) {
             try {
               const url = new URL(info.contentId);
-              const ts = parseInt(url.searchParams.get('ts'));
+              const ts  = parseInt(url.searchParams.get('ts'));
               if (!isNaN(ts)) {
-                const offset = (Date.now() - ts) / 1000;
-                console.log('Re-sync offset (s):', offset);
-                playerManager.seek(offset);
+                playerManager.seek((Date.now() - ts) / 1000);
               }
-            } catch (err) { /* ignore */ }
+            } catch (e) {}
           }
         }
       );
 
-      // ——— Start receiver ———
+      // Start receiver
       const options = new cast.framework.CastReceiverOptions();
       options.disableIdleTimeout = true;
       context.start(options);
