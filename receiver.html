@@ -2,8 +2,8 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Low-Latency Receiver v0.15</title>
-    <!-- CAF Receiver SDK v3 + D-Pad support for built-in TVs -->
+    <title>Low-Latency Receiver v0.16</title>
+    <!-- CAF Receiver SDK v3 + D-Pad support -->
     <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
     <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework_controls_dpad_tv.js"></script>
     <style>
@@ -12,7 +12,7 @@
         width:100%; height:100%;
         background:black; overflow:hidden;
       }
-      /* 1) Splash */
+      /* 1) Splash screen */
       #splash {
         position:absolute; inset:0;
         display:flex; flex-direction:column;
@@ -25,13 +25,7 @@
       #splash #version {
         color:white; margin-top:1em; font-size:1.2em;
       }
-      /* 2) Key-catcher (invisibly on top) */
-      #key-catcher {
-        position:absolute; inset:0;
-        z-index:15; outline:none;
-        display:none;
-      }
-      /* 3) CAF player */
+      /* 2) CAF player */
       cast-media-player {
         position:absolute; inset:0;
         --media-background-color:black;
@@ -42,16 +36,19 @@
         --media-control-bar-display:none;
         z-index:5;
       }
-      /* 4) Vertical menu (hidden until splash loads) */
+      /* 3) Key-catcher overlay (hidden until splash loads) */
+      #key-catcher {
+        position:absolute; inset:0;
+        z-index:15; outline:none;
+        display:none;
+      }
+      /* 4) Vertical menu */
       #menu {
         position:absolute; top:30%; left:50%;
         transform:translateX(-50%);
-        display:none;
-        flex-direction:column;
-        gap:1em;
+        display:none; flex-direction:column; gap:1em;
         background:rgba(0,0,0,0.8);
-        padding:1em 2em; border-radius:8px;
-        z-index:20;
+        padding:1em 2em; border-radius:8px; z-index:20;
       }
       #menu button {
         background:white; color:black;
@@ -71,21 +68,21 @@
     </style>
   </head>
   <body>
-    <!-- 1) Splash screen -->
+    <!-- 1) Splash -->
     <div id="splash">
       <img id="splash-img"
            src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png"
            alt="Loading…">
-      <div id="version">v0.15</div>
+      <div id="version">v0.16</div>
     </div>
 
-    <!-- 2) CAF-managed video player -->
+    <!-- 2) CAF-managed player -->
     <cast-media-player id="player"></cast-media-player>
 
-    <!-- 3) Invisible focusable overlay -->
+    <!-- 3) Key-catcher -->
     <div id="key-catcher" tabindex="0"></div>
 
-    <!-- 4) Vertical Stream/About menu -->
+    <!-- 4) Vertical menu -->
     <div id="menu">
       <button id="menu-stream">Stream</button>
       <button id="menu-about">About</button>
@@ -97,12 +94,12 @@
     <script>
       const STREAM_NS = 'urn:x-cast:com.example.stream';
 
-      // Initialize CAST framework
+      // Initialize CAF
       const context       = cast.framework.CastReceiverContext.getInstance();
       const playerManager = context.getPlayerManager();
       const options       = new cast.framework.CastReceiverOptions();
       options.disableIdleTimeout = true;
-      // low-latency: resume after 1 segment
+      // low-latency resume after 1 segment
       const cfg = playerManager.getPlaybackConfig();
       cfg.autoResumeNumberOfSegments = 1;
       playerManager.setPlaybackConfig(cfg);
@@ -113,7 +110,7 @@
       );
       context.start(options);
 
-      // Setup namespace bus
+      // Create message bus
       const bus = context.getCastMessageBus(STREAM_NS);
 
       // DOM refs
@@ -124,57 +121,66 @@
       const items     = Array.from(menu.querySelectorAll('button'));
       let idx = 0;
 
-      // After splash image finishes loading, reveal menu and key-catcher
+      function debug(msg) {
+        bus.send({ type:'debug', msg });
+      }
+
+      // After splash image loads, show catcher & menu
       splashImg.onload = () => {
+        debug('splash-img loaded');
         catcher.style.display = 'block';
-        menu.style.display    = 'flex';
-        // initial focus on first menu item
-        idx = 0;
-        items[idx].focus();
-        // ensure catcher stays focused to capture keys
+        menu.style.display    = 'flex';    // show it right away
+        idx = 0; items[idx].focus();
+        debug('menu displayed');
         catcher.focus();
       };
 
-      // Handle D-pad navigation and selection
       catcher.addEventListener('keydown', e => {
-        e.preventDefault();
+        debug('keydown '+e.keyCode);
+        e.preventDefault(); e.stopPropagation();
         switch (e.keyCode) {
           case 38: // Up
             idx = (idx + items.length - 1) % items.length;
             items[idx].focus();
+            debug('focus idx='+idx);
             break;
           case 40: // Down
             idx = (idx + 1) % items.length;
             items[idx].focus();
+            debug('focus idx='+idx);
             break;
           case 13: // Enter
+            debug('enter on idx='+idx);
             items[idx].click();
             break;
           case 8:  // Back
           case 10009:
-            // optionally hide info and refocus menu
-            info.style.display = 'none';
-            items[idx].focus();
+            debug('back pressed');
+            // no automatic hide
             break;
         }
       });
 
-      // “Stream” button: hide splash & send start
-      document.getElementById('menu-stream').addEventListener('click', () => {
-        document.getElementById('splash').style.display = 'none';
-        bus.send({ type:'start' });
-        catcher.focus();
-      });
+      // Stream button
+      document.getElementById('menu-stream')
+        .addEventListener('click', () => {
+          debug('Stream clicked');
+          document.getElementById('splash').style.display = 'none';
+          bus.send({ type:'start' });
+          catcher.focus();
+        });
 
-      // “About” button: show greeting
-      document.getElementById('menu-about').addEventListener('click', () => {
-        const now = new Date().toLocaleTimeString();
-        info.textContent =
-          `Hi Linda!\nHier ist ein selbstgebauter Player.\nLieben Gruß, Christoph\n\n` +
-          `Local Time: ${now}`;
-        info.style.display = 'block';
-        catcher.focus();
-      });
+      // About button
+      document.getElementById('menu-about')
+        .addEventListener('click', () => {
+          debug('About clicked');
+          const now = new Date().toLocaleTimeString();
+          info.textContent =
+            `Hi Linda!\nHier ist ein selbstgebauter Player.\nLieben Gruß, Christoph\n\n`+
+            `Local Time: ${now}`;
+          info.style.display = 'block';
+          catcher.focus();
+        });
     </script>
   </body>
 </html>
