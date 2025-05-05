@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Low‑Latency Receiver + Cheese Wheel + Auto‑Start v0.6</title>
+    <title>Low‑Latency Receiver + Cheese Wheel + Auto‑Start v0.5</title>
     <!-- CAF Receiver SDK v3 + D‑Pad support -->
     <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
     <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework_controls_dpad_tv.js"></script>
@@ -34,7 +34,7 @@
     <!-- splash + version -->
     <div id="splash">
       <img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Loading…" />
-      <div id="version">v0.6 + 🧀</div>
+      <div id="version">v0.5 + 🧀</div>
     </div>
 
     <!-- timer -->
@@ -66,40 +66,32 @@
       window.addEventListener('load', () => document.body.focus());
 
       /* ------------------------------------------------------------
-       * KEYBOARD / D‑PAD HANDLING
+       * KEYBOARD / D‑PAD HANDLING (simple: Left/Right nav, Enter executes)
        * ---------------------------------------------------------- */
       const menu      = document.getElementById('menu');
       const buttons   = Array.from(menu.querySelectorAll('button'));
       let currentIdx  = 0;
 
-      function selectButton(idx){
-        currentIdx = (idx + buttons.length) % buttons.length;
-        buttons[currentIdx].focus();
-      }
-
       function handleKey(e){
         const { key } = e;
 
-        const openMenuKeys  = ['ArrowUp','ArrowDown'];
-        const leftKeys      = ['ArrowLeft','ArrowUp'];   // treat Up as previous (for ease)
-        const rightKeys     = ['ArrowRight','ArrowDown']; // treat Down as next
-        const enterKeys     = ['Enter','OK',' '];        // spacebar for convenience
-
-        // Open menu with Up / Down when hidden
-        if(openMenuKeys.includes(key) && menu.style.display !== 'flex'){
+        // Open menu with Up/Down when hidden
+        if((key === 'ArrowUp' || key === 'ArrowDown') && menu.style.display !== 'flex'){
           menu.style.display = 'flex';
-          selectButton(0);
+          currentIdx = 0;
+          buttons[currentIdx].focus();
           e.preventDefault();
           return;
         }
 
         // Navigate only if menu visible
         if(menu.style.display === 'flex'){
-          if(leftKeys.includes(key))          selectButton(currentIdx - 1);
-          else if(rightKeys.includes(key))    selectButton(currentIdx + 1);
-          else if(enterKeys.includes(key))    buttons[currentIdx].click();
-          else if(key === 'Escape')           menu.style.display = 'none';
+          if(key === 'ArrowLeft')      currentIdx = (currentIdx + buttons.length - 1) % buttons.length;
+          else if(key === 'ArrowRight')currentIdx = (currentIdx + 1) % buttons.length;
+          else if(key === 'Enter')     buttons[currentIdx].click();
+          else if(key === 'Escape')    menu.style.display = 'none';
 
+          buttons[currentIdx].focus();
           e.preventDefault();
         }
       }
@@ -219,23 +211,4 @@
       const info = document.getElementById('info');
 
       /* ------------------------------------------------------------
-       * MENU BUTTON CALLBACKS
-       * ---------------------------------------------------------- */
-      document.getElementById('menu-stream').addEventListener('click', () => {
-        bus.send({ type: 'start' });
-        document.getElementById('splash').style.display = 'none';
-        menu.style.display = 'none';
-      });
-
-      document.getElementById('menu-about').addEventListener('click', () => {
-        info.textContent = `Hi Linda!\nHier ist ein selbstgebauter Player.\nLieben Gruß, Christoph`;
-        info.style.display = 'block';
-        // auto‑hide after 5 s
-        setTimeout(() => info.style.display = 'none', 5000);
-        menu.style.display = 'none';
-      });
-
-      /* ------------------------------------------------------------
-       * AUTO‑START AFTER 20 s (cancelled when menu opens)
-       * ---------------------------------------------------------- */
-      const autoStart
+       * MENU BUTTON CALLBACK
