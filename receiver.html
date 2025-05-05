@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Low‑Latency Receiver + Cheese Wheel + Auto‑Start v1.6</title>
+  <title>Low‑Latency Receiver + Cheese Wheel + Auto‑Start v1.7</title>
   <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
   <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework_controls_dpad_tv.js"></script>
   <style>
@@ -26,18 +26,18 @@
       80%  {transform:translate(-50%,-50%) scale(0.95);}         /* settle */
       100% {transform:translate(-50%,-50%) scale(1);}            /* final */
     }
-    #info{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,20,.92);color:#fff;box-shadow:0 0 0 3px #0af,0 0 12px #0af;padding:2em 2.5em;border-radius:12px;white-space:pre-line;font-size:1em;visibility:hidden;opacity:0;pointer-events:none;z-index:1000}
-    #info.show{visibility:visible;opacity:1;animation:popup .55s cubic-bezier(.34,1.56,.64,1) forwards}
+    #info{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,20,.92);color:#fff;box-shadow:0 0 0 3px #0af,0 0 12px #0af;padding:2em 2.5em;border-radius:12px;white-space:pre-line;font-size:1em;display:none;pointer-events:auto;z-index:9999}
+    #info.show{display:block;animation:popup .55s cubic-bezier(.34,1.56,.64,1) forwards}
   </style>
 </head>
 <body tabindex="0">
   <canvas id="cheeseCanvas"></canvas>
-  <div id="splash"><img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Loading…" /><div id="version">v1.6 + 🧀</div></div>
+  <div id="splash"><img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Loading…" /><div id="version">v1.7 + 🧀</div></div>
   <div id="timer">Elapsed: 0.0 s</div>
   <div id="debug">Bereit – keine Aktion</div>
   <cast-media-player id="player"></cast-media-player>
   <div id="menu"><button id="menu-stream">Stream</button><button id="menu-about">About</button></div>
-  <div id="info"></div>
+  <div id="info" role="dialog" aria-modal="true"></div>
 
 <script>
 const ROTATION_PERIOD=15,AUTO_START_MS=20000,HOLE_COUNT=12,IDLE_TEXT='Bereit – keine Aktion';
@@ -51,7 +51,7 @@ function handleKey(e){const k=e.key;if((k==='ArrowUp'||k==='ArrowDown')&&menu.st
 window.addEventListener('keydown',handleKey);
 const canvas=document.getElementById('cheeseCanvas'),ctx=canvas.getContext('2d'),timerEl=document.getElementById('timer');let lastTs=null,angle=0;const startTime=performance.now(),holes=[];function genHoles(){holes.length=0;const w=canvas.width,h=canvas.height,r=Math.min(w,h)*.3,cx=w/2,cy=h/2;for(let i=0;i<HOLE_COUNT;i++){const t=i/HOLE_COUNT*2*Math.PI,hr=r*(.15+.05*Math.random()),hx=cx+Math.cos(t)*r*.6*(.8+.2*Math.random()),hy=cy+Math.sin(t)*r*.6*(.8+.2*Math.random());holes.push({hx,hy,hr});}}function resize(){canvas.width=innerWidth;canvas.height=innerHeight;genHoles();}window.addEventListener('resize',resize);resize();function draw(ts){if(lastTs===null)lastTs=ts;const d=(ts-lastTs)/1000;lastTs=ts;angle=(angle+d*(2*Math.PI/ROTATION_PERIOD))%(2*Math.PI);timerEl.textContent=`Elapsed: ${((performance.now()-startTime)/1000).toFixed(1)} s`;const w=canvas.width,h=canvas.height,r=Math.min(w,h)*.3,cx=w/2,cy=h/2;ctx.clearRect(0,0,w,h);ctx.save();ctx.translate(cx,cy);ctx.rotate(angle);ctx.translate(-cx,-cy);ctx.beginPath();ctx.arc(cx,cy,r,0,2*Math.PI);ctx.fillStyle='#2277cc';ctx.fill();ctx.lineWidth=r*.05;ctx.strokeStyle='#1155aa';ctx.stroke();ctx.fillStyle='#114477';holes.forEach(({hx,hy,hr})=>{ctx.beginPath();ctx.arc(hx,hy,hr,0,2*Math.PI);ctx.fill();});ctx.restore();requestAnimationFrame(draw);}requestAnimationFrame(draw);
 const STREAM_NS='urn:x-cast:com.example.stream',castCtx=cast.framework.CastReceiverContext.getInstance(),mgr=castCtx.getPlayerManager();const opts=new cast.framework.CastReceiverOptions();opts.disableIdleTimeout=true;mgr.setPlaybackConfig({autoResumeNumberOfSegments:1});mgr.setMessageInterceptor(cast.framework.messages.MessageType.LOAD,req=>(req.autoplay=true,req));castCtx.start(opts);mgr.addEventListener(cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,()=>document.getElementById('splash').style.display='none');
-const info=document.getElementById('info');function showInfo(){const now=new Date().toLocaleTimeString();info.textContent=`Hi Linda!\nHier ist ein selbstgebauter Player.\nLieben Gruß, Christoph\n\n${now}`;info.classList.remove('show');void info.offsetWidth;info.classList.add('show');setTimeout(()=>info.classList.remove('show'),5000);}const bus=castCtx.getCastMessageBus(STREAM_NS);document.getElementById('menu-stream').addEventListener('click',()=>{bus.send({type:'start'});document.getElementById('splash').style.display='none';menu.style.display='none';showDebug('Aktion: Stream');});document.getElementById('menu-about').addEventListener('click',()=>{showInfo();menu.style.display='none';showDebug('Aktion: About');});
+const info=document.getElementById('info');function showInfo(){const now=new Date().toLocaleTimeString();info.textContent=`Hi Linda!\nHier ist ein selbstgebauter Player.\nLieben Gruß, Christoph\n\n${now}`;info.classList.add('show');setTimeout(()=>info.classList.remove('show'),5000);}const bus=castCtx.getCastMessageBus(STREAM_NS);document.getElementById('menu-stream').addEventListener('click',()=>{bus.send({type:'start'});document.getElementById('splash').style.display='none';menu.style.display='none';showDebug('Aktion: Stream');});document.getElementById('menu-about').addEventListener('click',()=>{showInfo();menu.style.display='none';showDebug('Aktion: About');});
 const autoStart=setTimeout(()=>{if(menu.style.display!=='flex'){bus.send({type:'start'});document.getElementById('splash').style.display='none';showDebug('Auto‑Start: Stream');}},AUTO_START_MS);buttons.forEach(b=>b.addEventListener('focus',()=>clearTimeout(autoStart)));
 </script>
 </body>
