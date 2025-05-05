@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Low‑Latency Receiver + Cheese Wheel + Auto‑Start v2.0</title>
+  <title>Low‑Latency Receiver + Cheese Wheel v2.1</title>
   <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
   <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework_controls_dpad_tv.js"></script>
   <style>
@@ -11,75 +11,63 @@
     #splash{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,.8);z-index:5}
     #splash img{max-width:80%}
     #splash #version{color:#fff;margin-top:1em;font-size:1.2em}
-    #timer{position:absolute;top:60%;left:50%;transform:translateX(-50%);color:#88f;font-size:1.2em;z-index:11;pointer-events:none}
-    #debug{position:absolute;top:72%;left:50%;transform:translateX(-50%);color:#0f0;font-size:1em;z-index:12;pointer-events:none;opacity:.7;transition:opacity .3s}
+    #timer{position:absolute;bottom:1em;left:50%;transform:translateX(-50%);color:#88f;font-size:1em;z-index:11;pointer-events:none}
+    #debug{position:absolute;bottom:3em;left:50%;transform:translateX(-50%);color:#0f0;font-size:1em;z-index:12;pointer-events:none;opacity:.7;transition:opacity .3s}
+    #menu{position:absolute;top:1em;left:50%;transform:translateX(-50%);background:#222d;padding:.75em 1em;border-radius:12px;gap:.5em;z-index:20;display:flex;flex-direction:row;box-shadow:0 0 12px rgba(0,0,0,.8)}
+    #menu button{background:#fff;color:#000;border:none;padding:.5em 1em;font-size:1em;border-radius:8px;transition:transform .15s}
+    #menu button:hover,#menu button:focus{outline:none;transform:scale(1.05)}
     cast-media-player{display:none}
-    #menu{position:absolute;top:10%;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.7);padding:1em;border-radius:8px;gap:1em;z-index:20;display:none;flex-direction:row}
-    #menu button{background:#fff;color:#000;border:none;padding:.5em 1em;font-size:1em;transition:background .1s}
-    #menu button:focus{outline:2px solid #0af}
-    #menu button.flash{background:#0f0 !important}
   </style>
 </head>
 <body tabindex="0">
   <canvas id="cheeseCanvas"></canvas>
-  <div id="splash"><img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Loading…" /><div id="version">v2.0 + 🧀</div></div>
-  <div id="timer">Elapsed: 0.0 s</div>
+  <div id="splash"><img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Loading…"/><div id="version">v2.1 + 🧀</div></div>
+  <div id="timer">0.0 s</div>
   <div id="debug">Bereit – keine Aktion</div>
   <cast-media-player id="player"></cast-media-player>
   <div id="menu">
-    <button id="menu-stream">Stream</button>
     <button id="menu-about">About</button>
-    <button id="menu-popup2">Popup 2</button>
+    <button id="menu-popup2">Popup 2</button>
+    <button id="menu-stream">Stream</button>
   </div>
 <script>
 const ROTATION_PERIOD=15,AUTO_START_MS=20000,HOLE_COUNT=12,IDLE_TEXT='Bereit – keine Aktion';
-window.addEventListener('load',()=>{document.body.focus();setIdle();});
-const menu=document.getElementById('menu'),buttons=[...menu.querySelectorAll('button')];let currentIdx=0;const debug=document.getElementById('debug');
+const menu=document.getElementById('menu');
+const buttons=[...menu.querySelectorAll('button')];
+const debug=document.getElementById('debug');
 function setIdle(){debug.textContent=IDLE_TEXT;debug.style.opacity=.7;}
-function showDebug(t){debug.textContent=t;debug.style.opacity=1;clearTimeout(showDebug.t);showDebug.t=setTimeout(setIdle,3000);} 
-function flash(b){b.classList.add('flash');setTimeout(()=>b.classList.remove('flash'),200);} 
-function select(i){currentIdx=(i+buttons.length)%buttons.length;buttons[currentIdx].focus();}
-function handleKey(e){const k=e.key;if((k==='ArrowUp'||k==='ArrowDown')&&menu.style.display!=='flex'){menu.style.display='flex';select(0);showDebug('Menü geöffnet');e.preventDefault();return;}if(menu.style.display==='flex'){if(k==='ArrowLeft'){select(currentIdx-1);}else if(k==='ArrowRight'){select(currentIdx+1);}else if(k==='Enter'||k==='OK'){flash(buttons[currentIdx]);buttons[currentIdx].click();}else if(k==='Escape'){menu.style.display='none';showDebug('Menü geschlossen');}e.preventDefault();}}
-window.addEventListener('keydown',handleKey);
-const canvas=document.getElementById('cheeseCanvas');
-const ctx=canvas.getContext('2d');
-const timerEl=document.getElementById('timer');
-let lastTs=null,angle=0;const startTime=performance.now();
+function showDebug(txt){debug.textContent=txt;debug.style.opacity=1;clearTimeout(showDebug.t);showDebug.t=setTimeout(setIdle,4000);} 
+function flash(btn){btn.animate([{transform:'scale(1)'},{transform:'scale(0.9)'},{transform:'scale(1)'}],{duration:200});}
+const canvas=document.getElementById('cheeseCanvas'),ctx=canvas.getContext('2d');
+const timerEl=document.getElementById('timer');let lastTs=null,angle=0;const startTime=performance.now();
 const holes=[];
 function genHoles(){holes.length=0;const w=canvas.width,h=canvas.height,r=Math.min(w,h)*.3,cx=w/2,cy=h/2;for(let i=0;i<HOLE_COUNT;i++){const t=i/HOLE_COUNT*2*Math.PI,hr=r*(.15+.05*Math.random()),hx=cx+Math.cos(t)*r*.6*(.8+.2*Math.random()),hy=cy+Math.sin(t)*r*.6*(.8+.2*Math.random());holes.push({hx,hy,hr});}}
 function resize(){canvas.width=innerWidth;canvas.height=innerHeight;genHoles();}
 window.addEventListener('resize',resize);resize();
-// popup state
-let popupActive=false,popupStart=0,popupDuration=3000,popupType=1;
-function triggerPopup(type=1){popupActive=true;popupStart=performance.now();popupType=type;menu.style.display='none';showDebug(`Popup ${type} gezeichnet`);}
-function draw(ts){if(lastTs===null)lastTs=ts;const d=(ts-lastTs)/1000;lastTs=ts;angle=(angle+d*(2*Math.PI/ROTATION_PERIOD))%(2*Math.PI);timerEl.textContent=`Elapsed: ${((performance.now()-startTime)/1000).toFixed(1)} s`;
+let popupActive=false,popupStart=0,popupDuration=3500,popupType=1;
+function triggerPopup(type=1){popupActive=true;popupStart=performance.now();popupType=type;showDebug(`Popup ${type} angezeigt`);} 
+function draw(ts){if(!lastTs)lastTs=ts;const d=(ts-lastTs)/1000;lastTs=ts;angle=(angle+d*(2*Math.PI/ROTATION_PERIOD))%(2*Math.PI);timerEl.textContent=`${((performance.now()-startTime)/1000).toFixed(1)} s`;
   const w=canvas.width,h=canvas.height,r=Math.min(w,h)*.3,cx=w/2,cy=h/2;
   ctx.clearRect(0,0,w,h);
   ctx.save();ctx.translate(cx,cy);ctx.rotate(angle);ctx.translate(-cx,-cy);
   ctx.beginPath();ctx.arc(cx,cy,r,0,2*Math.PI);ctx.fillStyle='#2277cc';ctx.fill();ctx.lineWidth=r*.05;ctx.strokeStyle='#1155aa';ctx.stroke();
   ctx.fillStyle='#114477';holes.forEach(({hx,hy,hr})=>{ctx.beginPath();ctx.arc(hx,hy,hr,0,2*Math.PI);ctx.fill();});ctx.restore();
   if(popupActive){const elapsed=performance.now()-popupStart;if(elapsed>popupDuration){popupActive=false;}else{
-      ctx.save();
-      const boxW=w*0.6,boxH=h*0.3;const bx=(w-boxW)/2,by=(h-boxH)/2;
-      ctx.globalAlpha=0.9;
-      ctx.fillStyle='#000';ctx.fillRect(bx,by,boxW,boxH);
-      ctx.lineWidth=4;ctx.strokeStyle='#0af';ctx.strokeRect(bx,by,boxW,boxH);
-      ctx.globalAlpha=1;
-      ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';
-      if(popupType===1){
-        ctx.font=`${Math.min(boxH*0.18,32)}px system-ui`;
-        ctx.fillText('Hi Linda! Hier ist ein',w/2,by+boxH*0.35);
-        ctx.fillText('selbstgebauter Player.',w/2,by+boxH*0.52);
-        ctx.font=`${Math.min(boxH*0.14,24)}px system-ui`;
-        ctx.fillText('Lieben Gruß, Christoph',w/2,by+boxH*0.75);
-      } else if(popupType===2){
-        ctx.font=`${Math.min(boxH*0.2,34)}px system-ui`;
-        ctx.fillText('🎉 Zweites Popup 🎉',w/2,by+boxH*0.5);
-      }
-      ctx.restore();}}
-  requestAnimationFrame(draw);
-}
+    ctx.save();
+    const boxW=w*0.6,boxH=h*0.3;const bx=(w-boxW)/2,by=(h-boxH)/2;
+    ctx.globalAlpha=0.95;ctx.fillStyle='rgba(0,0,0,.9)';ctx.fillRect(bx,by,boxW,boxH);
+    ctx.lineWidth=4;ctx.strokeStyle='#0af';ctx.strokeRect(bx,by,boxW,boxH);
+    ctx.globalAlpha=1;ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';
+    if(popupType===1){ctx.font=`${Math.min(boxH*0.18,36)}px system-ui`;ctx.fillText('Hi Linda – selbstgebauter Player 🎵',w/2,by+boxH*0.4);ctx.font=`${Math.min(boxH*0.14,26)}px system-ui`;ctx.fillText('Liebe Grüße, Christoph',w/2,by+boxH*0.7);}else if(popupType===2){ctx.font=`${Math.min(boxH*0.2,38)}px system-ui`;ctx.fillText('🎉 Zweites Popup 🎉',w/2,by+boxH*0.5);}ctx.restore();}}
+  requestAnimationFrame(draw);} 
 requestAnimationFrame(draw);
+// Button actions
+document.getElementById('menu-about').addEventListener('click',e=>{flash(e.target);triggerPopup(1);});
+document.getElementById('menu-popup2').addEventListener('click',e=>{flash(e.target);triggerPopup(2);});
+document.getElementById('menu-stream').addEventListener('click',e=>{flash(e.target);document.getElementById('splash').style.display='none';showDebug('Aktion: Stream gestartet');bus.send({type:'start'});} );
+// Quick demo popup after 2 s so user can see
+setTimeout(()=>triggerPopup(1),2000);
+// Cast receiver boilerplate
 const STREAM_NS='urn:x-cast:com.example.stream';
 const castCtx=cast.framework.CastReceiverContext.getInstance();
 const mgr=castCtx.getPlayerManager();
@@ -87,13 +75,8 @@ const opts=new cast.framework.CastReceiverOptions();opts.disableIdleTimeout=true
 mgr.setPlaybackConfig({autoResumeNumberOfSegments:1});
 castCtx.start(opts);
 const bus=castCtx.getCastMessageBus(STREAM_NS);
-document.getElementById('menu-stream').addEventListener('click',()=>{
-  flash(buttons[0]);showDebug('Aktion: Stream');bus.send({type:'start'});document.getElementById('splash').style.display='none';menu.style.display='none';});
-document.getElementById('menu-about').addEventListener('click',()=>{
-  flash(buttons[1]);triggerPopup(1);});
-document.getElementById('menu-popup2').addEventListener('click',()=>{
-  flash(buttons[2]);triggerPopup(2);});
-const autoStart=setTimeout(()=>{if(menu.style.display!=='flex'){bus.send({type:'start'});document.getElementById('splash').style.display='none';showDebug('Auto‑Start: Stream');}},AUTO_START_MS);buttons.forEach(b=>b.addEventListener('focus',()=>clearTimeout(autoStart)));
+// Optional keyboard shortcuts for easier desktop test
+window.addEventListener('keydown',e=>{if(e.key==='1')triggerPopup(1);else if(e.key==='2')triggerPopup(2);} );
 </script>
 </body>
 </html>
