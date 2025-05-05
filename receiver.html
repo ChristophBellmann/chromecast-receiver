@@ -6,50 +6,48 @@
     <script src="https://www.gstatic.com/cast/sdk/libs/receiver/2.0.0/cast_receiver.js"></script>
     <style>
       html, body {
-        margin: 0; padding: 0; width: 100%; height: 100%;
-        background: black; overflow: hidden;
+        margin:0; padding:0; width:100%; height:100%;
+        background:black; overflow:hidden;
       }
       /* Loading overlay */
       #loading {
-        position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-        display: flex; align-items: center; justify-content: center;
-        background: black; color: white; font-size: 2rem; z-index: 3000;
+        position:absolute; top:0; left:0; width:100%; height:100%;
+        display:flex; align-items:center; justify-content:center;
+        background:black; color:white; font-size:2rem; z-index:3000;
       }
-      /* The video element fills screen */
+      /* Video element */
       #video {
-        display: none;
-        width: 100%; height: 100%; object-fit: cover;
+        display:none;
+        width:100%; height:100%; object-fit:cover;
       }
-      /* Invisible full-screen key catcher */
+      /* Key catcher */
       #key-catcher {
-        position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-        z-index: 2000; outline: none;
+        position:absolute; top:0; left:0; width:100%; height:100%;
+        z-index:2000; outline:none;
       }
-      /* Menu (hidden until ready or via keys) */
+      /* Menu */
       #menu {
-        position: absolute; top: 40%; left: 50%;
-        transform: translate(-50%, -50%);
-        display: none; gap: 2rem; z-index: 1001;
+        position:absolute; top:40%; left:50%;
+        transform:translate(-50%,-50%);
+        display:none; gap:2rem; z-index:1001;
       }
       #menu button {
-        font-size: 2rem; padding: 1rem 2rem;
-        background: rgba(255,255,255,0.1);
-        border: 2px solid white; color: white;
+        font-size:2rem; padding:1rem 2rem;
+        background:rgba(255,255,255,0.1);
+        border:2px solid white; color:white;
       }
-      #menu button:focus {
-        outline: 3px solid #0af;
-      }
-      /* About & Info dialogs */
+      #menu button:focus { outline:3px solid #0af; }
+      /* About / Info dialogs */
       #about, #info {
-        position: absolute; top: 50%; left: 50%;
-        transform: translate(-50%, -50%);
-        background: rgba(0,0,0,0.8); color: white;
-        padding: 2rem; border-radius: 8px;
-        display: none; z-index: 1002; max-width: 80%; text-align: center;
+        position:absolute; top:50%; left:50%;
+        transform:translate(-50%,-50%);
+        background:rgba(0,0,0,0.8); color:white; padding:2rem;
+        border-radius:8px; display:none; z-index:1002;
+        max-width:80%; text-align:center;
       }
-      #info { text-align: left; font-family: monospace; }
+      #info { text-align:left; font-family:monospace; }
       #about button, #info button {
-        margin-top: 1rem; font-size: 1.2rem; padding: 0.5rem 1rem;
+        margin-top:1rem; font-size:1.2rem; padding:0.5rem 1rem;
       }
     </style>
   </head>
@@ -82,27 +80,27 @@
     <video id="video" playsinline></video>
 
     <script>
-      // DOM refs
-      const loading   = document.getElementById('loading');
-      const catcher   = document.getElementById('key-catcher');
-      const menu      = document.getElementById('menu');
-      const aboutBox  = document.getElementById('about');
-      const infoBox   = document.getElementById('info');
-      const buttons   = Array.from(menu.querySelectorAll('button'));
-      const videoEl   = document.getElementById('video');
+      // Elements
+      const loading = document.getElementById('loading');
+      const catcher = document.getElementById('key-catcher');
+      const menu    = document.getElementById('menu');
+      const about   = document.getElementById('about');
+      const info    = document.getElementById('info');
+      const buttons = Array.from(menu.querySelectorAll('button'));
+      const videoEl = document.getElementById('video');
       let idx = 0, streamUrl = null, startTs = null;
 
       // Focus catcher on load
-      window.addEventListener('load', () => catcher.focus());
+      window.addEventListener('load', ()=> catcher.focus());
 
-      // Initialize Cast
+      // Initialize Cast Receiver with custom <video>
       const context       = cast.framework.CastReceiverContext.getInstance();
       const options       = new cast.framework.CastReceiverOptions();
       options.mediaElement     = videoEl;
       options.disableIdleTimeout = true;
       const playerManager = context.getPlayerManager();
 
-      // Once receiver is ready: hide loading, show menu, focus catcher
+      // On READY, hide loading and show menu
       context.addEventListener(
         cast.framework.system.EventType.READY,
         () => {
@@ -112,114 +110,115 @@
         }
       );
 
-      // Helper to show & focus menu
+      // Show menu helper
       function showMenu() {
         menu.style.display = 'flex';
         idx = 0;
         buttons[idx].focus();
       }
 
-      // Global key listener (ArrowUp/Down) on document + catcher
-      function onKeyDown(e) {
-        const kc = e.keyCode;
-        const up   = e.key === 'ArrowUp'   || kc === 38;
-        const down = e.key === 'ArrowDown' || kc === 40;
-        if (up || down) {
+      // Capture Up/Down on both document and catcher
+      function keyHandler(e) {
+        const code = e.keyCode;
+        const isUp = e.key==='ArrowUp' || code===38;
+        const isDn = e.key==='ArrowDown' || code===40;
+        if (isUp||isDn) {
           showMenu();
           e.preventDefault();
         }
       }
-      document.addEventListener('keydown', onKeyDown);
-      catcher.addEventListener('keydown', onKeyDown);
+      document.addEventListener('keydown', keyHandler);
+      catcher.addEventListener('keydown', keyHandler);
 
-      // Menu navigation + activation
-      function onMenuNav(e) {
-        if (menu.style.display === 'flex') {
-          const kc = e.keyCode;
-          const left  = e.key === 'ArrowLeft'  || kc === 37;
-          const right = e.key === 'ArrowRight' || kc === 39;
-          const up    = e.key === 'ArrowUp'    || kc === 38;
-          const down  = e.key === 'ArrowDown'  || kc === 40;
-          const ok    = e.key === 'Enter'      || e.key === ' '   || kc === 13;
-          if (left || up)    idx = (idx + buttons.length - 1) % buttons.length;
-          else if (right || down) idx = (idx + 1) % buttons.length;
-          else if (ok)       buttons[idx].click();
-          buttons[idx].focus();
-          e.preventDefault();
-        }
+      // Menu navigation & selection
+      function navHandler(e) {
+        if (menu.style.display!=='flex') return;
+        const code = e.keyCode;
+        const left  = e.key==='ArrowLeft'  || code===37;
+        const right = e.key==='ArrowRight' || code===39;
+        const up    = e.key==='ArrowUp'    || code===38;
+        const down  = e.key==='ArrowDown'  || code===40;
+        const ok    = e.key==='Enter'      || e.key===' '   || code===13;
+        if (left||up)      idx=(idx+buttons.length-1)%buttons.length;
+        else if (right||down) idx=(idx+1)%buttons.length;
+        else if (ok)       buttons[idx].click();
+        buttons[idx].focus();
+        e.preventDefault();
       }
-      document.addEventListener('keydown', onMenuNav);
-      catcher.addEventListener('keydown', onMenuNav);
+      document.addEventListener('keydown', navHandler);
+      catcher.addEventListener('keydown', navHandler);
 
       // Button handlers
-      document.getElementById('stream-btn').addEventListener('click', () => {
-        menu.style.display = 'none';
-        catcher.focus();
+      document.getElementById('stream-btn').addEventListener('click', ()=>{
+        menu.style.display='none'; catcher.focus();
       });
-      document.getElementById('about-btn').addEventListener('click', () => {
-        aboutBox.style.display = 'block';
+      document.getElementById('about-btn').addEventListener('click', ()=>{
+        about.style.display='block';
         document.getElementById('about-close').focus();
       });
-      document.getElementById('about-close').addEventListener('click', () => {
-        aboutBox.style.display = 'none';
-        catcher.focus();
+      document.getElementById('about-close').addEventListener('click', ()=>{
+        about.style.display='none'; catcher.focus();
       });
-      document.getElementById('info-btn').addEventListener('click', () => {
-        // populate info
+      document.getElementById('info-btn').addEventListener('click', ()=>{
         const now = new Date();
-        document.getElementById('time').textContent  = `Local Time: ${now.toLocaleTimeString()}`;
+        document.getElementById('time').textContent = 
+          `Local Time: ${now.toLocaleTimeString()}`;
         if (streamUrl) {
           const t0 = Date.now();
-          fetch(streamUrl, { method: 'HEAD' })
-            .then(() => document.getElementById('ping').textContent = `Ping: ${Date.now()-t0} ms`)
-            .catch(() => document.getElementById('ping').textContent = 'Ping: error');
+          fetch(streamUrl,{method:'HEAD'})
+            .then(()=>document.getElementById('ping').textContent=`Ping: ${Date.now()-t0} ms`)
+            .catch(()=>document.getElementById('ping').textContent='Ping: error');
         }
         if (startTs) {
-          document.getElementById('delay').textContent =
+          document.getElementById('delay').textContent=
             `Stream Delay: ${((Date.now()-startTs)/1000).toFixed(2)} s`;
         }
-        document.getElementById('video-info').textContent =
+        document.getElementById('video-info').textContent=
           `Video: ${videoEl.videoWidth}×${videoEl.videoHeight}`;
-        infoBox.style.display = 'block';
+        info.style.display='block';
         document.getElementById('info-close').focus();
       });
-      document.getElementById('info-close').addEventListener('click', () => {
-        infoBox.style.display = 'none';
-        catcher.focus();
+      document.getElementById('info-close').addEventListener('click', ()=>{
+        info.style.display='none'; catcher.focus();
       });
 
-      // Sync on LOAD
+      // Sync on LOAD, set video.src
       playerManager.setMessageInterceptor(
         cast.framework.messages.MessageType.LOAD, req => {
-          menu.style.display     =
-            aboutBox.style.display =
-            infoBox.style.display = 'none';
+          menu.style.display=about.style.display=info.style.display='none';
           streamUrl = req.media.contentId;
           try {
             const u = new URL(streamUrl);
-            startTs   = parseInt(u.searchParams.get('ts'), 10);
+            startTs   = parseInt(u.searchParams.get('ts'),10);
             if (!isNaN(startTs)) {
-              req.currentTime = (Date.now() - startTs) / 1000;
+              req.currentTime = (Date.now()-startTs)/1000;
             }
-          } catch (e) {}
+          } catch(e){}
           videoEl.src = streamUrl;
+          // Show loading until playback starts
+          loading.style.display = 'flex';
+          // Hide loading 2s after first 'playing'
+          videoEl.addEventListener('playing', function once() {
+            setTimeout(()=> loading.style.display='none', 2000);
+            videoEl.removeEventListener('playing', once);
+          });
+          // Fallback: hide loading after 15s even if no 'playing'
+          setTimeout(()=> loading.style.display='none', 15000);
           catcher.focus();
           return req;
         }
       );
 
-      // Re-sync and re-focus on PLAYING
+      // Re-sync on resume & re-focus catcher
       playerManager.addEventListener(
-        cast.framework.events.EventType.PLAYING, () => {
-          if (startTs) {
-            videoEl.currentTime = (Date.now() - startTs) / 1000;
-          }
+        cast.framework.events.EventType.PLAYING, ()=>{
+          if (startTs) videoEl.currentTime = (Date.now()-startTs)/1000;
           videoEl.play();
           catcher.focus();
         }
       );
 
-      // Start the receiver
+      // Start receiver
       context.start(options);
     </script>
   </body>
