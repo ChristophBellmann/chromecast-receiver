@@ -1,176 +1,193 @@
 <!DOCTYPE html>
 <html>
-<head>
-  <meta charset="utf-8" />
-  <title>Low-Latency Receiver v0.1</title>
-  <!-- 1) Load the Web Receiver SDK -->
-  <script src="https://www.gstatic.com/cast/sdk/libs/receiver/2.0.0/cast_receiver.js"></script>
-  <style>
-    html, body {
-      margin:0; padding:0;
-      width:100%; height:100%;
-      background:black; overflow:hidden;
-    }
-    /* 2) cast-media-player full screen, custom splash */
-    cast-media-player {
-      width:100%; height:100%;
-      --media-background-color: black;
-      --media-splash-image: url('https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png');
-      --media-splash-image-size: contain;
-      --media-splash-image-position: center center;
-      /* hide native control bar */
-      --media-control-bar-display: none;
-    }
-    /* Menu overlay */
-    #menu {
-      position:absolute; top:40%; left:50%;
-      transform:translate(-50%,-50%);
-      display:none; gap:2rem; z-index:200;
-    }
-    #menu button {
-      font-size:2rem; padding:1rem 2rem;
-      background:rgba(255,255,255,0.1);
-      border:2px solid #fff; color:#fff;
-    }
-    #menu button:focus { outline:3px solid #0af; }
-    /* About & Info dialogs */
-    .dialog {
-      position:absolute; top:50%; left:50%;
-      transform:translate(-50%,-50%);
-      background:rgba(0,0,0,0.8); color:white;
-      padding:2rem; border-radius:8px;
-      display:none; z-index:300; text-align:center;
-      max-width:80%;
-    }
-    .dialog pre { text-align:left; font-family:monospace; }
-    .dialog button {
-      margin-top:1rem; font-size:1.2rem; padding:0.5rem 1rem;
-    }
-  </style>
-</head>
-<body>
-  <!-- 3) The SDK-managed player -->
-  <cast-media-player id="player"></cast-media-player>
+  <head>
+    <meta charset="utf-8" />
+    <title>Low-Latency Receiver v0.1</title>
+    <!-- 1) Load the Web Receiver SDK -->
+    <script src="https://www.gstatic.com/cast/sdk/libs/receiver/2.0.0/cast_receiver.js"></script>
+    <style>
+      html, body {
+        margin: 0; padding: 0;
+        width: 100%; height: 100%;
+        background: black; overflow: hidden;
+      }
 
-  <!-- 4) Your menu & dialogs -->
-  <div id="menu">
-    <button id="stream">Stream</button>
-    <button id="about">About</button>
-    <button id="info">Info</button>
-  </div>
+      /* 2) Full-screen cast player with custom splash */
+      cast-media-player {
+        width:100%; height:100%;
+        /* Your PNG will show automatically until playback starts */
+        --media-background-color: black;
+        --media-splash-image: url('https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png');
+        --media-splash-image-size: contain;
+        --media-splash-image-position: center center;
+        /* Hide the default yellow progress bar */
+        --media-control-bar-display: none;
+      }
 
-  <div id="aboutDlg" class="dialog">
-    <h2>Low-Latency Receiver</h2>
-    <p>Hi Linda! Hier ist ein selbstgebauter Player.<br/>Lieben Gruß, Christoph</p>
-    <button id="closeAbout">Close</button>
-  </div>
+      /* 3) Overlay menu (hidden by default) */
+      #menu {
+        position: absolute;
+        top: 40%; left: 50%;
+        transform: translate(-50%, -50%);
+        display: none;
+        gap: 2rem;
+        z-index: 10;
+      }
+      #menu button {
+        font-size: 2rem;
+        padding: 1rem 2rem;
+        background: rgba(255,255,255,0.1);
+        border: 2px solid white;
+        color: white;
+      }
+      #menu button:focus {
+        outline: 3px solid #0af;
+      }
 
-  <div id="infoDlg" class="dialog">
-    <h2>Info</h2>
-    <pre id="stats">
+      /* 4) About & Info dialogs */
+      .dialog {
+        position: absolute;
+        top: 50%; left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0,0,0,0.8);
+        color: white;
+        padding: 2rem;
+        border-radius: 8px;
+        display: none;
+        z-index: 20;
+        text-align: center;
+        max-width: 80%;
+      }
+      .dialog pre {
+        text-align: left;
+        font-family: monospace;
+      }
+      .dialog button {
+        margin-top: 1rem;
+        font-size: 1.2rem;
+        padding: 0.5rem 1rem;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- 5) The SDK-managed player -->
+    <cast-media-player id="player"></cast-media-player>
+
+    <!-- 6) Menu & dialogs -->
+    <div id="menu">
+      <button id="stream">Stream</button>
+      <button id="about">About</button>
+      <button id="info">Info</button>
+    </div>
+
+    <div id="aboutDlg" class="dialog">
+      <h2>Low-Latency Receiver</h2>
+      <p>Hi Linda! Hier ist ein selbstgebauter Player.<br/>Lieben Gruß, Christoph</p>
+      <button id="closeAbout">Close</button>
+    </div>
+
+    <div id="infoDlg" class="dialog">
+      <h2>Info</h2>
+      <pre id="stats">
 Ping: -- ms
 Delay: -- s
 Video: --×--
 Audio: AAC 192 kbps, Stereo
-    </pre>
-    <button id="closeInfo">Close</button>
-  </div>
+      </pre>
+      <button id="closeInfo">Close</button>
+    </div>
 
-  <script>
-    const context       = cast.framework.CastReceiverContext.getInstance();
-    const options       = new cast.framework.CastReceiverOptions();
-    // 5) support all basic media commands (LOAD, PLAY, PAUSE, SEEK, VOLUME, MUTE) :contentReference[oaicite:1]{index=1}
-    options.supportedCommands = cast.framework.messages.Command.ALL_BASIC_MEDIA;
-    options.disableIdleTimeout = true;
-    context.setOptions(options);
+    <script>
+      const context       = cast.framework.CastReceiverContext.getInstance();
+      const options       = new cast.framework.CastReceiverOptions();
+      // 7) Support ALL basic media commands so ▲/▼, ◀/▶, Play/Pause, Seek, Volume, Back all work
+      options.supportedCommands = cast.framework.messages.Command.ALL_BASIC_MEDIA;
+      options.disableIdleTimeout = true;
+      context.setOptions(options);
 
-    const playerManager = context.getPlayerManager();
-    const player        = document.getElementById('player');
+      const playerManager = context.getPlayerManager();
+      const player        = document.getElementById('player');
 
-    // Helpers
-    const menu     = document.getElementById('menu');
-    const aboutDlg = document.getElementById('aboutDlg');
-    const infoDlg  = document.getElementById('infoDlg');
-    function showMenu() {
-      menu.style.display = 'flex';
-      menu.querySelector('button').focus();
-    }
-    function hideAll() {
-      menu.style.display = 'none';
-      aboutDlg.style.display = 'none';
-      infoDlg.style.display = 'none';
-    }
+      // Quick refs
+      const menu     = document.getElementById('menu');
+      const aboutDlg = document.getElementById('aboutDlg');
+      const infoDlg  = document.getElementById('infoDlg');
+      let streamTs;
 
-    // 6) Open menu on volume change, pause, or seek
-    playerManager.addEventListener(
-      cast.framework.events.EventType.VOLUME_CHANGED, showMenu);
-    playerManager.addEventListener(
-      cast.framework.events.EventType.MEDIA_STATUS, e => {
-        if (e.mediaStatus.playerState === 'PAUSED' ||
-            e.mediaStatus.playerState === 'IDLE') {
-          showMenu();
+      // Show/Hide helpers
+      function showMenu()   { menu.style.display = 'flex'; menu.firstElementChild.focus(); }
+      function hideMenu()   { menu.style.display = 'none'; }
+      function hideAll()    { hideMenu(); aboutDlg.style.display = ''; infoDlg.style.display = ''; }
+
+      // 8) When the user hits ▲/▼ (volume), Pause, or Seek, show the menu
+      playerManager.addEventListener(
+        cast.framework.events.EventType.VOLUME_CHANGED, showMenu
+      );
+      playerManager.addEventListener(
+        cast.framework.events.EventType.PLAYER_STATE_CHANGED,
+        e => {
+          if (e.state === 'PAUSED' || e.state === 'IDLE') showMenu();
         }
-      });
-    playerManager.addEventListener(
-      cast.framework.events.EventType.SEEKED, showMenu);
+      );
+      playerManager.addEventListener(
+        cast.framework.events.EventType.SEEKED, showMenu
+      );
 
-    // Stream/About/Info button logic
-    document.getElementById('stream').addEventListener('click', ()=>{
-      hideAll();
-      playerManager.play();
-    });
-    document.getElementById('about').addEventListener('click', ()=>{
-      aboutDlg.style.display = 'block';
-      document.getElementById('closeAbout').focus();
-    });
-    document.getElementById('closeAbout').addEventListener('click', ()=>{
-      aboutDlg.style.display = 'none';
-      menu.style.display = 'flex';
-    });
+      // 9) Button actions
+      document.getElementById('stream').onclick = () => {
+        hideAll();
+        playerManager.play();
+      };
+      document.getElementById('about').onclick = () => {
+        aboutDlg.style.display = 'block';
+        document.getElementById('closeAbout').focus();
+      };
+      document.getElementById('closeAbout').onclick = () => {
+        aboutDlg.style.display = '';
+        showMenu();
+      };
 
-    document.getElementById('info').addEventListener('click', ()=>{
-      // fill stats
-      const now = new Date();
-      let txt = `Local Time: ${now.toLocaleTimeString()}\n`;
-      // Ping HEAD
-      const url = playerManager.getMediaInformation().contentId;
-      fetch(url,{method:'HEAD'}).then(()=>{
-        txt = `Ping: ${Date.now()} ms\n` + txt;
-      }).catch(()=>{
-        txt = `Ping: N/A\n` + txt;
-      }).finally(()=>{
-        const status = playerManager.getMediaStatus();
-        txt += `Delay: ${status.streamPosition.toFixed(1)} s\n`;
-        txt += `Video: ${status.media.metadata.width}×${status.media.metadata.height}\n`;
-        txt += `Audio: AAC 192 kbps, Stereo\n`;
-        document.getElementById('stats').textContent = txt;
-      });
-      infoDlg.style.display = 'block';
-      document.getElementById('closeInfo').focus();
-    });
-    document.getElementById('closeInfo').addEventListener('click', ()=>{
-      infoDlg.style.display = 'none';
-      menu.style.display = 'flex';
-    });
+      document.getElementById('info').onclick = () => {
+        // gather stats
+        const now = new Date();
+        let txt = `Local Time: ${now.toLocaleTimeString()}\n`;
+        // ping HEAD
+        const url = playerManager.getMediaInformation().contentId;
+        fetch(url, {method:'HEAD'}).then(()=>{
+          txt = `Ping: ${Date.now()} ms\n` + txt;
+        }).catch(()=>{
+          txt = `Ping: N/A\n` + txt;
+        }).finally(()=>{
+          const status = playerManager.getMediaStatus();
+          txt += `Delay: ${status.streamPosition.toFixed(1)} s\n`;
+          txt += `Video: ${status.media.metadata.width}×${status.media.metadata.height}\n`;
+          txt += `Audio: AAC 192 kbps, Stereo\n`;
+          document.getElementById('stats').textContent = txt;
+          infoDlg.style.display = 'block';
+          document.getElementById('closeInfo').focus();
+        });
+      };
+      document.getElementById('closeInfo').onclick = () => {
+        infoDlg.style.display = '';
+        showMenu();
+      };
 
-    // 7) Timestamp sync on LOAD
-    playerManager.setMessageInterceptor(
-      cast.framework.messages.MessageType.LOAD, loadReq => {
-        try {
-          const u  = new URL(loadReq.media.contentId);
-          const ts = parseInt(u.searchParams.get('ts'),10);
+      // 10) Timestamp sync on LOAD
+      playerManager.setMessageInterceptor(
+        cast.framework.messages.MessageType.LOAD,
+        loadRequestData => {
+          const u = new URL(loadRequestData.media.contentId);
+          const ts = parseInt(u.searchParams.get('ts'), 10);
           if (!isNaN(ts)) {
-            loadReq.currentTime = (Date.now() - ts)/1000;
+            streamTs = ts;
+            loadRequestData.currentTime = (Date.now() - ts)/1000;
           }
-        } catch(e){}
-        return loadReq;
-      }
-    );
+          return loadRequestData;
+        }
+      );
 
-    // 8) After playback starts, SDK will auto-remove splash; no manual JS needed
-
-    // 9) Start the receiver
-    context.start();
-  </script>
-</body>
+      // 11) Start the receiver
+      context.start();
+    </script>
+  </body>
 </html>
