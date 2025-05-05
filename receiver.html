@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Low‑Latency Receiver + Cheese Wheel + Auto‑Start v0.9</title>
+  <title>Low‑Latency Receiver + Cheese Wheel + Auto‑Start v1.1</title>
   <!-- CAF Receiver SDK v3 + D‑Pad support -->
   <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
   <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework_controls_dpad_tv.js"></script>
@@ -15,9 +15,9 @@
     #splash img{max-width:80%}
     #splash #version{color:#fff;margin-top:1em;font-size:1.2em}
     /* timer */
-    #timer{position:absolute;top:60%;left:50%;transform:translateX(-50%);color:#88f;font-size:1.2em;z-index:8;pointer-events:none}
-    /* debug text under wheel */
-    #debug{position:absolute;top:72%;left:50%;transform:translateX(-50%);color:#0f0;font-size:1em;z-index:8;pointer-events:none;opacity:0;transition:opacity .3s}
+    #timer{position:absolute;top:60%;left:50%;transform:translateX(-50%);color:#88f;font-size:1.2em;z-index:11;pointer-events:none}
+    /* debug text in front of wheel & splash */
+    #debug{position:absolute;top:72%;left:50%;transform:translateX(-50%);color:#0f0;font-size:1em;z-index:15;pointer-events:none;opacity:0;transition:opacity .3s}
     /* hide CAF UI */
     cast-media-player{display:none}
     /* menu */
@@ -38,12 +38,11 @@
   <!-- splash -->
   <div id="splash">
     <img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Loading…" />
-    <div id="version">v0.9 + 🧀</div>
+    <div id="version">v1.1 + 🧀</div>
   </div>
 
-  <!-- timer -->
+  <!-- timer & debug -->
   <div id="timer">Elapsed: 0.0 s</div>
-  <!-- debug text -->
   <div id="debug"></div>
 
   <!-- CAF player (hidden) -->
@@ -130,7 +129,13 @@
   });
 
   /* -------------------- AUTO‑START -------------------- */
-  const autoStart=setTimeout(()=>{if(menu.style.display!=='flex'){bus.send({type:'start'});document.getElementById('splash').style.display='none';showDebug('Auto‑start stream');}},AUTO_START_MS);
+  const autoStart=setTimeout(()=>{
+    if(menu.style.display!=='flex'){
+      bus.send({type:'start'});
+      document.getElementById('splash').style.display='none';
+      showDebug('Auto‑start stream');
+    }
+  },AUTO_START_MS);
   buttons.forEach(b=>b.addEventListener('focus',()=>clearTimeout(autoStart)));
 </script>
 
