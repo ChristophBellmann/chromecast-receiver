@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Low‑Latency Receiver + Cheese Wheel + Auto‑Start v1.7</title>
+  <title>Low‑Latency Receiver + Cheese Wheel + Auto‑Start v1.8</title>
   <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
   <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework_controls_dpad_tv.js"></script>
   <style>
@@ -32,7 +32,7 @@
 </head>
 <body tabindex="0">
   <canvas id="cheeseCanvas"></canvas>
-  <div id="splash"><img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Loading…" /><div id="version">v1.7 + 🧀</div></div>
+  <div id="splash"><img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Loading…" /><div id="version">v1.8 + 🧀</div></div>
   <div id="timer">Elapsed: 0.0 s</div>
   <div id="debug">Bereit – keine Aktion</div>
   <cast-media-player id="player"></cast-media-player>
@@ -47,12 +47,49 @@ function setIdle(){debug.textContent=IDLE_TEXT;debug.style.opacity=.7;}
 function showDebug(t){debug.textContent=t;debug.style.opacity=1;clearTimeout(showDebug.t);showDebug.t=setTimeout(setIdle,2000);} 
 function flash(b){b.classList.add('flash');setTimeout(()=>b.classList.remove('flash'),200);} 
 function select(i){currentIdx=(i+buttons.length)%buttons.length;buttons[currentIdx].focus();}
-function handleKey(e){const k=e.key;if((k==='ArrowUp'||k==='ArrowDown')&&menu.style.display!=='flex'){menu.style.display='flex';select(0);e.preventDefault();return;}if(menu.style.display==='flex'){if(k==='ArrowLeft')select(currentIdx-1);else if(k==='ArrowRight')select(currentIdx+1);else if(k==='Enter'||k==='OK'){flash(buttons[currentIdx]);showDebug('Aktion: '+buttons[currentIdx].textContent);buttons[currentIdx].click();}else if(k==='Escape')menu.style.display='none';e.preventDefault();}}
+function handleKey(e){const k=e.key;if((k==='ArrowUp'||k==='ArrowDown')&&menu.style.display!=='flex'){menu.style.display='flex';select(0);e.preventDefault();return;}if(menu.style.display==='flex'){if(k==='ArrowLeft')select(currentIdx-1);else if(k==='ArrowRight')select(currentIdx+1);else if(k==='Enter'||k==='OK'){flash(buttons[currentIdx]);buttons[currentIdx].click();}else if(k==='Escape')menu.style.display='none';e.preventDefault();}}
 window.addEventListener('keydown',handleKey);
 const canvas=document.getElementById('cheeseCanvas'),ctx=canvas.getContext('2d'),timerEl=document.getElementById('timer');let lastTs=null,angle=0;const startTime=performance.now(),holes=[];function genHoles(){holes.length=0;const w=canvas.width,h=canvas.height,r=Math.min(w,h)*.3,cx=w/2,cy=h/2;for(let i=0;i<HOLE_COUNT;i++){const t=i/HOLE_COUNT*2*Math.PI,hr=r*(.15+.05*Math.random()),hx=cx+Math.cos(t)*r*.6*(.8+.2*Math.random()),hy=cy+Math.sin(t)*r*.6*(.8+.2*Math.random());holes.push({hx,hy,hr});}}function resize(){canvas.width=innerWidth;canvas.height=innerHeight;genHoles();}window.addEventListener('resize',resize);resize();function draw(ts){if(lastTs===null)lastTs=ts;const d=(ts-lastTs)/1000;lastTs=ts;angle=(angle+d*(2*Math.PI/ROTATION_PERIOD))%(2*Math.PI);timerEl.textContent=`Elapsed: ${((performance.now()-startTime)/1000).toFixed(1)} s`;const w=canvas.width,h=canvas.height,r=Math.min(w,h)*.3,cx=w/2,cy=h/2;ctx.clearRect(0,0,w,h);ctx.save();ctx.translate(cx,cy);ctx.rotate(angle);ctx.translate(-cx,-cy);ctx.beginPath();ctx.arc(cx,cy,r,0,2*Math.PI);ctx.fillStyle='#2277cc';ctx.fill();ctx.lineWidth=r*.05;ctx.strokeStyle='#1155aa';ctx.stroke();ctx.fillStyle='#114477';holes.forEach(({hx,hy,hr})=>{ctx.beginPath();ctx.arc(hx,hy,hr,0,2*Math.PI);ctx.fill();});ctx.restore();requestAnimationFrame(draw);}requestAnimationFrame(draw);
-const STREAM_NS='urn:x-cast:com.example.stream',castCtx=cast.framework.CastReceiverContext.getInstance(),mgr=castCtx.getPlayerManager();const opts=new cast.framework.CastReceiverOptions();opts.disableIdleTimeout=true;mgr.setPlaybackConfig({autoResumeNumberOfSegments:1});mgr.setMessageInterceptor(cast.framework.messages.MessageType.LOAD,req=>(req.autoplay=true,req));castCtx.start(opts);mgr.addEventListener(cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,()=>document.getElementById('splash').style.display='none');
-const info=document.getElementById('info');function showInfo(){const now=new Date().toLocaleTimeString();info.textContent=`Hi Linda!\nHier ist ein selbstgebauter Player.\nLieben Gruß, Christoph\n\n${now}`;info.classList.add('show');setTimeout(()=>info.classList.remove('show'),5000);}const bus=castCtx.getCastMessageBus(STREAM_NS);document.getElementById('menu-stream').addEventListener('click',()=>{bus.send({type:'start'});document.getElementById('splash').style.display='none';menu.style.display='none';showDebug('Aktion: Stream');});document.getElementById('menu-about').addEventListener('click',()=>{showInfo();menu.style.display='none';showDebug('Aktion: About');});
-const autoStart=setTimeout(()=>{if(menu.style.display!=='flex'){bus.send({type:'start'});document.getElementById('splash').style.display='none';showDebug('Auto‑Start: Stream');}},AUTO_START_MS);buttons.forEach(b=>b.addEventListener('focus',()=>clearTimeout(autoStart)));
+const STREAM_NS='urn:x-cast:com.example.stream';
+const castCtx=cast.framework.CastReceiverContext.getInstance();
+const mgr=castCtx.getPlayerManager();
+const opts=new cast.framework.CastReceiverOptions();opts.disableIdleTimeout=true;
+mgr.setPlaybackConfig({autoResumeNumberOfSegments:1});
+mgr.setMessageInterceptor(cast.framework.messages.MessageType.LOAD,req=>(req.autoplay=true,req));
+castCtx.start(opts);
+mgr.addEventListener(cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,()=>document.getElementById('splash').style.display='none');
+const info=document.getElementById('info');
+function showInfo(){
+  const now=new Date().toLocaleTimeString();
+  info.textContent=`Hi Linda!\nHier ist ein selbstgebauter Player.\nLieben Gruß, Christoph\n\n${now}`;
+  info.classList.remove('show');
+  void info.offsetWidth;           // force reflow to restart animation
+  info.classList.add('show');
+  showDebug('Box geöffnet');
+  setTimeout(()=>info.classList.remove('show'),5000);
+}
+const bus=castCtx.getCastMessageBus(STREAM_NS);
+document.getElementById('menu-stream').addEventListener('click',()=>{
+  showDebug('Aktion: Stream');
+  flash(buttons[0]);
+  bus.send({type:'start'});
+  document.getElementById('splash').style.display='none';
+  menu.style.display='none';
+});
+document.getElementById('menu-about').addEventListener('click',()=>{
+  showDebug('Aktion: About');
+  flash(buttons[1]);
+  showInfo();
+  menu.style.display='none';
+});
+const autoStart=setTimeout(()=>{
+  if(menu.style.display!=='flex'){
+    bus.send({type:'start'});
+    document.getElementById('splash').style.display='none';
+    showDebug('Auto‑Start: Stream');
+  }
+},AUTO_START_MS);
+buttons.forEach(b=>b.addEventListener('focus',()=>clearTimeout(autoStart)));
 </script>
 </body>
 </html>
