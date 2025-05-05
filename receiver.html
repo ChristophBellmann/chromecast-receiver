@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Low‑Latency Receiver + Cheese Wheel + Auto‑Start v0.4</title>
+    <title>Low‑Latency Receiver + Cheese Wheel + Auto‑Start v0.5</title>
     <!-- CAF Receiver SDK v3 + D‑Pad support -->
     <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
     <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework_controls_dpad_tv.js"></script>
@@ -22,9 +22,8 @@
       #menu{position:absolute;top:10%;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.7);padding:1em;border-radius:8px;gap:1em;z-index:20;display:none;flex-direction:row}
       #menu button{background:#fff;color:#000;border:none;padding:.5em 1em;font-size:1em}
       #menu button:focus{outline:2px solid #0af}
-      /* 6) info overlay (center pop‑in) */
-      #info{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(0);transform-origin:center;background:rgba(0,0,0,.9);color:#fff;padding:2em;border-radius:12px;white-space:pre-line;z-index:30;font-size:1em;display:none;transition:transform .4s ease-out}
-      #info.show{transform:translate(-50%,-50%) scale(1)}
+      /* 6) simple info box (bottom‑left) */
+      #info{position:absolute;bottom:5%;left:5%;background:rgba(0,0,0,.7);color:#fff;padding:1em;white-space:pre-line;z-index:30;font-size:.9em;display:none}
     </style>
   </head>
   <!-- tabindex ensures body can receive focus and therefore key events -->
@@ -35,7 +34,7 @@
     <!-- splash + version -->
     <div id="splash">
       <img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Loading…" />
-      <div id="version">v0.4 + 🧀</div>
+      <div id="version">v0.5 + 🧀</div>
     </div>
 
     <!-- timer -->
@@ -50,7 +49,7 @@
       <button id="menu-about">About</button>
     </div>
 
-    <!-- info pop‑up -->
+    <!-- info pop‑up (simple) -->
     <div id="info"></div>
 
     <script>
@@ -206,32 +205,10 @@
       );
 
       /* ------------------------------------------------------------
-       * MESSAGE BUS & "ABOUT" POP‑UP
+       * MESSAGE BUS (no Ping)
        * ---------------------------------------------------------- */
-      const bus      = castCtx.getCastMessageBus(STREAM_NS);
-      const info     = document.getElementById('info');
-      let   pingMs   = '--';
-      const sessionId = (castCtx.getApplicationData()?.sessionId) || 'n/a';
-
-      function updateInfoBox(){
-        const now = new Date().toLocaleTimeString();
-        info.textContent = `Hi Linda!\nHier ist ein selbstgebauter Player.\nLieben Gruß, Christoph\n\nInfo:\nUhrzeit: ${now}\nPing: ${pingMs} ms\nID: ${sessionId}`;
-      }
-
-      function pingSender(){
-        const t0 = performance.now();
-        bus.broadcast({ type: 'ping', t0 });
-        // fallback update after 1 s in case no pong
-        setTimeout(() => { if(pingMs === '--') updateInfoBox(); }, 1000);
-      }
-
-      bus.addEventListener('message', ev => {
-        const data = ev.data;
-        if(data.type === 'pong' && typeof data.t0 === 'number'){
-          pingMs = Math.round(performance.now() - data.t0);
-          updateInfoBox();
-        }
-      });
+      const bus  = castCtx.getCastMessageBus(STREAM_NS);
+      const info = document.getElementById('info');
 
       /* ------------------------------------------------------------
        * MENU BUTTON CALLBACKS
@@ -242,4 +219,25 @@
         menu.style.display = 'none';
       });
 
-      document.getElementById('menu-about').addEventListener('click', ()
+      document.getElementById('menu-about').addEventListener('click', () => {
+        info.textContent = `Hi Linda!\nHier ist ein selbstgebauter Player.\nLieben Gruß, Christoph`;
+        info.style.display = 'block';
+        // auto‑hide after 5 s
+        setTimeout(() => info.style.display = 'none', 5000);
+        menu.style.display = 'none';
+      });
+
+      /* ------------------------------------------------------------
+       * AUTO‑START AFTER 20 s (cancelled when menu opens)
+       * ---------------------------------------------------------- */
+      const autoStart = setTimeout(() => {
+        if(menu.style.display !== 'flex'){
+          bus.send({ type: 'start' });
+          document.getElementById('splash').style.display = 'none';
+        }
+      }, AUTO_START_MS);
+
+      buttons.forEach(btn => btn.addEventListener('focus', () => clearTimeout(autoStart)));
+    </script>
+  </body>
+</html>
