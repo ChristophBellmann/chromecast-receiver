@@ -1,123 +1,221 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Low-Latency Receiver v0.1</title>
-    <!-- 1) Load the Web Receiver SDK -->
-    <script src="https://www.gstatic.com/cast/sdk/libs/receiver/2.0.0/cast_receiver.js"></script>
-    <style>
-      /* Full-screen black bg */
-      html, body {
-        margin:0; padding:0; width:100%; height:100%;
-        background:black; overflow:hidden;
-      }
+<head>
+  <meta charset="utf-8" />
+  <title>Low-Latency Receiver v0.1</title>
+  <script src="https://www.gstatic.com/cast/sdk/libs/receiver/2.0.0/cast_receiver.js"></script>
+  <style>
+    html, body {
+      margin:0; padding:0; width:100%; height:100%;
+      background:#000; overflow:hidden;
+    }
+    /* video layer */
+    #video {
+      display:none;
+      position:absolute; top:0; left:0;
+      width:100%; height:100%; object-fit:cover;
+      z-index:1;
+    }
+    /* loading splash */
+    #loading {
+      position:absolute; top:0; left:0;
+      width:100%; height:100%;
+      background: #000 url('https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png') center center no-repeat;
+      background-size: contain;
+      z-index:2;
+    }
+    /* invisible key catcher */
+    #key-catcher {
+      position:absolute; top:0; left:0; width:100%; height:100%;
+      z-index:3; outline:none;
+    }
+    /* menu overlay */
+    #menu {
+      position:absolute; top:40%; left:50%;
+      transform:translate(-50%,-50%);
+      display:none; gap:2rem; z-index:4;
+    }
+    #menu button {
+      font-size:2rem; padding:1rem 2rem;
+      background:rgba(255,255,255,0.1);
+      border:2px solid #fff; color:#fff;
+    }
+    #menu button:focus {
+      outline:3px solid #0af;
+    }
+    /* dialogs */
+    #about, #info {
+      position:absolute; top:50%; left:50%;
+      transform:translate(-50%,-50%);
+      background:rgba(0,0,0,0.8); color:#fff;
+      padding:2rem; border-radius:8px;
+      display:none; z-index:5; max-width:80%; text-align:center;
+    }
+    #info { text-align:left; font-family:monospace; }
+    #about button, #info button {
+      margin-top:1rem; font-size:1.2rem; padding:0.5rem 1rem;
+    }
+  </style>
+</head>
+<body>
+  <!-- Splash screen -->
+  <div id="loading"></div>
 
-      /* 2) Cast Media Player with custom splash */
-      cast-media-player {
-        width:100%; height:100%;
-        --media-background-color: black; 
-        /* Show this splash until we load real media */
-        --media-splash-image: url('https://your-cdn.com/splash-v0.1.png');
-        --media-splash-image-size: contain;
-        --media-splash-image-position: center center;
-        /* hide the default control bar */
-        --media-control-bar-display: none;
-      }
+  <!-- Key catcher -->
+  <div id="key-catcher" tabindex="0"></div>
 
-      /* 3) When native controls appear, hide the yellow bar */
-      cast-media-player::part(controls-overlay) {
-        background: rgba(0,0,0,0.6);
-      }
+  <!-- Menu -->
+  <div id="menu">
+    <button id="stream-btn" tabindex="1">Stream</button>
+    <button id="about-btn"  tabindex="2">About</button>
+    <button id="info-btn"   tabindex="3">Info</button>
+  </div>
 
-      /* 4) “About” & “Info” overlays */
-      .overlay {
-        position:absolute; top:10%; left:10%;
-        color:white; background:rgba(0,0,0,0.7);
-        padding:1rem; border-radius:4px;
-        display:none; z-index:200;
-      }
-      .overlay h2 { margin-top:0; }
-    </style>
-  </head>
-  <body>
-    <!-- The cast-managed player -->
-    <cast-media-player id="player"></cast-media-player>
+  <!-- About dialog -->
+  <div id="about">
+    <h2>Low-Latency Receiver</h2>
+    <p>Hi Linda! Hier ist ein selbstgebauter Player.<br/>Lieben Gruß, Christoph</p>
+    <button id="about-close" tabindex="4">Close</button>
+  </div>
 
-    <!-- Simple overlays -->
-    <div id="about" class="overlay">
-      <h2>About</h2>
-      <p>Hi Linda! Hier ist ein selbstgebauter Player.<br/>Lieben Gruß, Christoph</p>
-      <p><em>v0.1</em></p>
+  <!-- Info dialog -->
+  <div id="info">
+    <h2>Info</h2>
+    <div id="stats">
+      <div id="ping">Ping: -- ms</div>
+      <div id="time">Local Time: --:--:--</div>
+      <div id="delay">Stream Delay: -- s</div>
+      <div id="video-info">Video: --×--</div>
+      <div id="audio-info">Audio: AAC 192 kbps, Stereo</div>
     </div>
-    <div id="info" class="overlay">
-      <h2>Info</h2>
-      <pre id="stats">
-Ping: -- ms
-Delay: -- s
-Video: --×--
-Audio: AAC 192 kbps, Stereo
-      </pre>
-    </div>
+    <button id="info-close" tabindex="5">Close</button>
+  </div>
 
-    <script>
-      const context = cast.framework.CastReceiverContext.getInstance();
-      const playerManager = context.getPlayerManager();
+  <!-- Actual video playback -->
+  <video id="video" playsinline></video>
 
-      // 5) Only listen for the commands we care about
-      context.setOptions({
-        supportedCommands: [
-          cast.framework.messages.CommandType.PAUSE,
-          cast.framework.messages.CommandType.SEEK,
-          cast.framework.messages.CommandType.STOP,
-          cast.framework.messages.CommandType.BACK,
-          cast.framework.messages.CommandType.STREAM_VOLUME,
-          cast.framework.messages.CommandType.STREAM_MUTE
-        ],
-        disableIdleTimeout: true
-      });
+  <script>
+    // Elements
+    const loading = document.getElementById('loading');
+    const catcher = document.getElementById('key-catcher');
+    const menu    = document.getElementById('menu');
+    const about   = document.getElementById('about');
+    const info    = document.getElementById('info');
+    const buttons = Array.from(menu.querySelectorAll('button'));
+    const videoEl = document.getElementById('video');
+    let idx = 0, streamUrl = null, startTs = null;
 
-      // 6) On LOAD, capture ts= for sync, then let the native splash stay up until playing
-      playerManager.setMessageInterceptor(
-        cast.framework.messages.MessageType.LOAD, data => {
-          const url = new URL(data.media.contentId);
-          const ts  = parseInt(url.searchParams.get('ts'),10);
-          if (!isNaN(ts)) {
-            data.currentTime = (Date.now() - ts)/1000;
+    // Keep focus on catcher
+    window.addEventListener('load', () => catcher.focus());
+
+    // Initialize Cast Receiver with custom video
+    const context       = cast.framework.CastReceiverContext.getInstance();
+    const options       = new cast.framework.CastReceiverOptions();
+    options.mediaElement     = videoEl;
+    options.disableIdleTimeout = true;
+    const playerManager = context.getPlayerManager();
+
+    // Helper to show menu
+    function showMenu() {
+      menu.style.display = 'flex';
+      idx = 0; buttons[idx].focus();
+    }
+
+    // Capture Up/Down anywhere
+    function keyHandler(e) {
+      const kc = e.keyCode;
+      if (e.key==='ArrowUp' || kc===38 || e.key==='ArrowDown' || kc===40) {
+        showMenu(); e.preventDefault();
+      }
+    }
+    document.addEventListener('keydown', keyHandler);
+    catcher.addEventListener('keydown', keyHandler);
+
+    // Menu navigation
+    function navHandler(e) {
+      if (menu.style.display !== 'flex') return;
+      const kc = e.keyCode;
+      if ([37,38].includes(kc)) idx = (idx + buttons.length - 1) % buttons.length;
+      if ([39,40].includes(kc)) idx = (idx + 1) % buttons.length;
+      if ([13,32].includes(kc)) buttons[idx].click();
+      buttons[idx].focus();
+      e.preventDefault();
+    }
+    document.addEventListener('keydown', navHandler);
+    catcher.addEventListener('keydown', navHandler);
+
+    // Button handlers
+    document.getElementById('stream-btn').addEventListener('click', ()=>{
+      menu.style.display='none'; catcher.focus();
+    });
+    document.getElementById('about-btn').addEventListener('click', ()=>{
+      about.style.display='block';
+      document.getElementById('about-close').focus();
+    });
+    document.getElementById('about-close').addEventListener('click', ()=>{
+      about.style.display='none'; catcher.focus();
+    });
+    document.getElementById('info-btn').addEventListener('click', ()=>{
+      const now = new Date();
+      document.getElementById('time').textContent  = 
+        `Local Time: ${now.toLocaleTimeString()}`;
+      if (streamUrl) {
+        const t0 = Date.now();
+        fetch(streamUrl, {method:'HEAD'})
+          .then(()=>document.getElementById('ping').textContent=`Ping: ${Date.now()-t0} ms`)
+          .catch(()=>document.getElementById('ping').textContent='Ping: error');
+      }
+      if (startTs) {
+        document.getElementById('delay').textContent=
+          `Stream Delay: ${((Date.now()-startTs)/1000).toFixed(2)} s`;
+      }
+      document.getElementById('video-info').textContent=
+        `Video: ${videoEl.videoWidth}×${videoEl.videoHeight}`;
+      info.style.display='block';
+      document.getElementById('info-close').focus();
+    });
+    document.getElementById('info-close').addEventListener('click', ()=>{
+      info.style.display='none'; catcher.focus();
+    });
+
+    // On LOAD: sync, show video & loading, then hide loading on playing
+    playerManager.setMessageInterceptor(
+      cast.framework.messages.MessageType.LOAD, req => {
+        streamUrl = req.media.contentId;
+        try {
+          const u = new URL(streamUrl);
+          startTs = parseInt(u.searchParams.get('ts'),10);
+          if (!isNaN(startTs)) {
+            req.currentTime = (Date.now() - startTs) / 1000;
           }
-          return data;
-        }
-      );
+        } catch(e){}
+        // reveal video under splash
+        videoEl.style.display = 'block';
+        videoEl.src = streamUrl;
+        loading.style.display = 'block';
+        // when first playing fires, hide splash after 2s
+        videoEl.addEventListener('playing', function once() {
+          setTimeout(()=>loading.style.display='none', 2000);
+          videoEl.removeEventListener('playing', once);
+        });
+        // fallback hide after 15s
+        setTimeout(()=>loading.style.display='none', 15000);
+        catcher.focus();
+        return req;
+      }
+    );
 
-      // 7) Toggle About/Info with RIGHT/LEFT arrows
-      document.addEventListener('keydown', e => {
-        // Back or STOP hides everything
-        if (e.key === 'Backspace' || e.keyCode === 10009) {
-          document.getElementById('about').style.display = 'none';
-          document.getElementById('info').style.display  = 'none';
-        }
-        // ▶ (RIGHT) shows About
-        else if (e.key === 'ArrowRight') {
-          document.getElementById('about').style.display = 'block';
-        }
-        // ◀ (LEFT) shows Info
-        else if (e.key === 'ArrowLeft') {
-          // update ping & delay
-          fetch(playerManager.getMediaInformation().contentId, {method:'HEAD'})
-            .then(() => {
-              const ping = Math.round(performance.now());
-              const delay = ((Date.now() - ts)/1000).toFixed(1);
-              document.getElementById('stats').textContent =
-                `Ping: ${ping} ms\nDelay: ${delay} s\n` +
-                `Video: ${playerManager.getMediaStatus().media.metadata.width}×` +
-                `${playerManager.getMediaStatus().media.metadata.height}\n` +
-                `Audio: AAC 192 kbps, Stereo`;
-              document.getElementById('info').style.display = 'block';
-            });
-        }
-      });
+    // Re-sync on resume
+    playerManager.addEventListener(
+      cast.framework.events.EventType.PLAYING, ()=>{
+        if (startTs) videoEl.currentTime = (Date.now() - startTs)/1000;
+        videoEl.play();
+        catcher.focus();
+      }
+    );
 
-      // 8) Start the receiver
-      context.start();
-    </script>
-  </body>
+    // Start!
+    context.start(options);
+  </script>
+</body>
 </html>
