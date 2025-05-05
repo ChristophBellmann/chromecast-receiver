@@ -6,32 +6,38 @@
     <script src="https://www.gstatic.com/cast/sdk/libs/receiver/2.0.0/cast_receiver.js"></script>
     <style>
       html, body {
-        margin:0; padding:0; width:100%; height:100%; background:black; overflow:hidden;
+        margin:0; padding:0; width:100%; height:100%;
+        background:black; overflow:hidden;
       }
-      /* Full-screen invisible overlay to capture keys */
+      /* our video tag */
+      #video {
+        width:100%; height:100%; object-fit:cover;
+        background:black;
+      }
+      /* full-screen key catcher */
       #key-catcher {
         position:absolute; top:0; left:0; width:100%; height:100%;
         z-index:2000; outline:none;
       }
-      cast-media-player {
-        display:none; width:100%; height:100%; position:absolute; top:0; left:0;
-      }
-      /* Menu overlay */
+      /* menu overlay */
       #menu {
         position:absolute; top:40%; left:50%;
-        transform:translate(-50%,-50%); display:flex; gap:2rem; z-index:1000;
+        transform:translate(-50%,-50%); display:flex; gap:2rem;
+        z-index:1001;
       }
       #menu button {
         font-size:2rem; padding:1rem 2rem;
-        background:rgba(255,255,255,0.1); border:2px solid white; color:white;
+        background:rgba(255,255,255,0.1);
+        border:2px solid white; color:white;
       }
       #menu button:focus { outline:3px solid #0af; }
-      /* About & Info dialogs */
+      /* dialogs */
       #about, #info {
         position:absolute; top:50%; left:50%;
         transform:translate(-50%,-50%);
-        background:rgba(0,0,0,0.8); color:white; padding:2rem;
-        border-radius:8px; display:none; z-index:1001; max-width:80%; text-align:center;
+        background:rgba(0,0,0,0.8); color:white;
+        padding:2rem; border-radius:8px;
+        display:none; z-index:1002; max-width:80%; text-align:center;
       }
       #info { text-align:left; font-family:monospace; }
       #about button, #info button {
@@ -40,21 +46,24 @@
     </style>
   </head>
   <body>
-    <!-- Invisible full-screen element to grab remote keys -->
+    <!-- Invisible focus‐catcher -->
     <div id="key-catcher" tabindex="0"></div>
 
+    <!-- Menu -->
     <div id="menu">
       <button id="stream-btn" tabindex="1">Stream</button>
       <button id="about-btn"  tabindex="2">About</button>
       <button id="info-btn"   tabindex="3">Info</button>
     </div>
 
+    <!-- About dialog -->
     <div id="about">
       <h2>Low-Latency Receiver</h2>
       <p>Hi Linda! Hier ist ein selbstgebauter Player.<br/>Lieben Gruß, Christoph</p>
       <button id="about-close" tabindex="4">Close</button>
     </div>
 
+    <!-- Info dialog -->
     <div id="info">
       <h2>Info</h2>
       <div id="ping">Ping: -- ms</div>
@@ -65,16 +74,20 @@
       <button id="info-close" tabindex="5">Close</button>
     </div>
 
-    <cast-media-player id="player"></cast-media-player>
+    <!-- Our video element -->
+    <video id="video" playsinline></video>
 
     <script>
-      // Focus our invisible catcher so it gets all key events
+      // focus catcher on load
       const catcher = document.getElementById('key-catcher');
-      window.addEventListener('load', () => {
-        catcher.focus();
-      });
+      window.addEventListener('load', ()=>{ catcher.focus() });
 
+      // Cast setup
+      const videoEl       = document.getElementById('video');
       const context       = cast.framework.CastReceiverContext.getInstance();
+      const options       = new cast.framework.CastReceiverOptions();
+      options.mediaElement     = videoEl;       // use our <video>
+      options.disableIdleTimeout = true;
       const playerManager = context.getPlayerManager();
 
       let streamUrl = null, startTs = null;
@@ -84,119 +97,97 @@
       const buttons  = Array.from(menu.querySelectorAll('button'));
       let idx = 0;
 
-      // Helper: show menu
-      function showMenu() {
-        menu.style.display = 'flex';
-        idx = 0;
-        buttons[idx].focus();
-      }
-
-      // Key handler (modern + legacy)
+      // show menu on ▲/▼ (modern + legacy keycodes)
       catcher.addEventListener('keydown', e => {
-        const up   = e.key === 'ArrowUp'   || e.keyCode === 38;
-        const down = e.key === 'ArrowDown' || e.keyCode === 40;
-        if (up || down) {
-          showMenu();
+        const up   = e.key==='ArrowUp'   || e.keyCode===38;
+        const down = e.key==='ArrowDown' || e.keyCode===40;
+        if (up||down) {
+          menu.style.display = 'flex';
+          idx = 0; buttons[idx].focus();
           e.preventDefault();
         }
       });
 
-      // Navigation & selection
+      // navigate & select
       catcher.addEventListener('keydown', e => {
-        if (menu.style.display !== 'none') {
-          const left  = e.key === 'ArrowLeft'  || e.keyCode === 37;
-          const right = e.key === 'ArrowRight' || e.keyCode === 39;
-          const up    = e.key === 'ArrowUp'    || e.keyCode === 38;
-          const down  = e.key === 'ArrowDown'  || e.keyCode === 40;
-          const ok    = e.key === 'Enter'      || e.key === ' '   || e.keyCode === 13;
-          if (left||up) {
-            idx = (idx + buttons.length - 1) % buttons.length;
-            buttons[idx].focus();
-          } else if (right||down) {
-            idx = (idx + 1) % buttons.length;
-            buttons[idx].focus();
-          } else if (ok) {
-            buttons[idx].click();
-          }
+        if (menu.style.display==='flex') {
+          const left  = e.key==='ArrowLeft'  || e.keyCode===37;
+          const right = e.key==='ArrowRight' || e.keyCode===39;
+          const up    = e.key==='ArrowUp'    || e.keyCode===38;
+          const down  = e.key==='ArrowDown'  || e.keyCode===40;
+          const ok    = e.key==='Enter'      || e.key===' '   || e.keyCode===13;
+          if (left||up)    idx=(idx+buttons.length-1)%buttons.length;
+          else if (right||down) idx=(idx+1)%buttons.length;
+          else if (ok)     buttons[idx].click();
+          buttons[idx].focus();
           e.preventDefault();
         }
       });
 
-      // Button handlers
+      // button handlers
       document.getElementById('stream-btn').addEventListener('click', ()=>{
-        menu.style.display = 'none';
-        catcher.focus();
+        menu.style.display='none'; catcher.focus();
       });
       document.getElementById('about-btn').addEventListener('click', ()=>{
-        aboutBox.style.display = 'block';
+        aboutBox.style.display='block'; 
         document.getElementById('about-close').focus();
       });
       document.getElementById('about-close').addEventListener('click', ()=>{
-        aboutBox.style.display = 'none';
-        catcher.focus();
+        aboutBox.style.display='none'; catcher.focus();
       });
       document.getElementById('info-btn').addEventListener('click', ()=>{
-        // populate
+        // populate Info
         const now = new Date();
-        document.getElementById('time').textContent  = `Local Time: ${now.toLocaleTimeString()}`;
+        document.getElementById('time').textContent  = 
+          `Local Time: ${now.toLocaleTimeString()}`;
         if (streamUrl) {
-          const t0 = Date.now();
-          fetch(streamUrl, {method:'HEAD'}).then(()=>{
-            document.getElementById('ping').textContent = `Ping: ${Date.now()-t0} ms`;
-          }).catch(()=>{
-            document.getElementById('ping').textContent = `Ping: error`;
-          });
+          const t0=Date.now();
+          fetch(streamUrl,{method:'HEAD'})
+            .then(()=>document.getElementById('ping').textContent=`Ping: ${Date.now()-t0} ms`)
+            .catch(_=>document.getElementById('ping').textContent='Ping: error');
         }
         if (startTs) {
-          document.getElementById('delay').textContent = 
+          document.getElementById('delay').textContent= 
             `Stream Delay: ${((Date.now()-startTs)/1000).toFixed(2)} s`;
         }
-        const v = document.querySelector('video');
-        if (v) {
-          document.getElementById('video-info').textContent = 
-            `Video: ${v.videoWidth}×${v.videoHeight}`;
-        }
-        infoBox.style.display = 'block';
+        document.getElementById('video-info').textContent=
+          `Video: ${videoEl.videoWidth}×${videoEl.videoHeight}`;
+        infoBox.style.display='block';
         document.getElementById('info-close').focus();
       });
       document.getElementById('info-close').addEventListener('click', ()=>{
-        infoBox.style.display = 'none';
-        catcher.focus();
+        infoBox.style.display='none'; catcher.focus();
       });
 
       // Sync on LOAD
       playerManager.setMessageInterceptor(
-        cast.framework.messages.MessageType.LOAD, data=>{
-          menu.style.display    = 'none';
-          aboutBox.style.display= 'none';
-          infoBox.style.display = 'none';
-          document.getElementById('player').style.display = 'block';
-
-          data.autoplay = true;
+        cast.framework.messages.MessageType.LOAD, req=> {
+          menu.style.display=aboutBox.style.display=infoBox.style.display='none';
+          streamUrl = req.media.contentId;
           try {
-            const url = new URL(data.media.contentId);
-            streamUrl = data.media.contentId;
+            const url = new URL(streamUrl);
             startTs   = parseInt(url.searchParams.get('ts'),10);
             if (!isNaN(startTs)) {
-              data.currentTime = (Date.now()-startTs)/1000;
+              req.currentTime = (Date.now()-startTs)/1000;
             }
           } catch(e){}
-          return data;
+          // set video src and manual play
+          videoEl.src = streamUrl;
+          return req;
         }
       );
 
-      // Re-sync on PLAYING
+      // on PLAYING (resume) re-sync and play
       playerManager.addEventListener(
-        cast.framework.events.EventType.PLAYING, ()=>{
+        cast.framework.events.EventType.PLAYING, ()=> {
           if (startTs) {
-            playerManager.seek((Date.now()-startTs)/1000);
+            videoEl.currentTime = (Date.now()-startTs)/1000;
           }
+          videoEl.play();
         }
       );
 
-      // Start receiver
-      const options = new cast.framework.CastReceiverOptions();
-      options.disableIdleTimeout = true;
+      // start
       context.start(options);
     </script>
   </body>
