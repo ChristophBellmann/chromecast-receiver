@@ -2,145 +2,138 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Low-Latency Receiver v0.20</title>
-    <!-- CAF SDK + D-Pad support -->
+    <title>Low-Latency Receiver + Remote-Start</title>
+    <!-- CAF Receiver SDK v3 + D-Pad support -->
     <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
     <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework_controls_dpad_tv.js"></script>
     <style>
-      html, body { margin:0; padding:0; width:100%; height:100%; background:black; overflow:hidden; }
+      html, body { margin:0; padding:0; width:100%; height:100%; background:black; }
+      /* splash */
       #splash {
-        position:absolute; inset:0;
-        display:flex; flex-direction:column;
+        position:absolute; inset:0; display:flex;
         align-items:center; justify-content:center;
         background:black; z-index:10;
       }
-      #splash img { max-width:80%; height:auto; }
-      #splash #version { color:white; margin-top:1em; font-size:1.2em; }
+      #splash img { max-width:80%; }
+      #splash #version { color:white; margin-top:1em; }
+      /* player */
       cast-media-player {
-        position:absolute; inset:0;
+        position:absolute; inset:0; width:100%; height:100%;
         --media-background-color:black;
-        --media-splash-image:
-          url('https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png');
+        --media-splash-image:url('https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png');
         --media-splash-image-size:contain;
         --media-splash-image-position:center center;
         --media-control-bar-display:none;
-        z-index:5;
       }
-      #key-catcher { position:absolute; inset:0; display:none; z-index:15; outline:none; }
+      /* menu */
       #menu {
-        position:absolute; top:30%; left:50%;
+        position:absolute; top:10%; left:50%;
         transform:translateX(-50%);
-        display:none; flex-direction:column; gap:1em;
-        background:rgba(0,0,0,0.8); padding:1em 2em; border-radius:8px; z-index:20;
+        display:none; background:rgba(0,0,0,0.7);
+        padding:1em; border-radius:8px; gap:1em; z-index:20;
+        display:flex;
       }
-      #menu button { background:white; color:black; border:none; padding:1em; font-size:1rem; }
-      #menu button:focus { outline:2px solid #0af; }
+      #menu button {
+        background:white; color:black; border:none;
+        padding:0.5em 1em; font-size:1em;
+      }
+      /* info overlay */
       #info {
         position:absolute; bottom:5%; left:5%;
-        background:rgba(0,0,0,0.8); color:white;
-        padding:1em; white-space:pre-line; font-size:0.9em;
-        z-index:20; display:none;
+        background:rgba(0,0,0,0.7); color:white;
+        padding:1em; white-space:pre-line; z-index:20;
+        display:none; font-size:0.9em;
       }
     </style>
   </head>
   <body>
     <div id="splash">
-      <img id="splash-img" src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Loading…">
-      <div id="version">v0.20</div>
+      <img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Loading…">
+      <div id="version">v0.1</div>
     </div>
 
     <cast-media-player id="player"></cast-media-player>
-    <div id="key-catcher" tabindex="0"></div>
+
     <div id="menu">
       <button id="menu-stream">Stream</button>
       <button id="menu-about">About</button>
     </div>
+
     <div id="info"></div>
 
     <script>
       const STREAM_NS = 'urn:x-cast:com.example.stream';
+
+      // 1) Initialize CAF
       const context       = cast.framework.CastReceiverContext.getInstance();
       const playerManager = context.getPlayerManager();
       const options       = new cast.framework.CastReceiverOptions();
       options.disableIdleTimeout = true;
+      // low-latency resume after 1 segment
       const cfg = playerManager.getPlaybackConfig();
       cfg.autoResumeNumberOfSegments = 1;
       playerManager.setPlaybackConfig(cfg);
+      // force autoplay
       playerManager.setMessageInterceptor(
         cast.framework.messages.MessageType.LOAD,
         req => { req.autoplay = true; return req; }
       );
-
-      // **1) Startup & disable idle by setting an app state + heartbeat**
       context.start(options);
-      function setState() {
-        context.setApplicationState('Ready to Cast v0.20');
-      }
-      setState();
-      setInterval(setState, 10_000);
 
+      // 2) Hide splash on first load complete
+      playerManager.addEventListener(
+        cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
+        () => document.getElementById('splash').style.display = 'none'
+      );
+
+      // 3) Create message bus for “start” command
       const bus = context.getCastMessageBus(STREAM_NS);
-      const splashImg = document.getElementById('splash-img');
-      const splash    = document.getElementById('splash');
-      const catcher   = document.getElementById('key-catcher');
-      const menu      = document.getElementById('menu');
-      const info      = document.getElementById('info');
-      const items     = Array.from(menu.querySelectorAll('button'));
+
+      // 4) Menu logic: open on Up/Down, navigate with Left/Right, select with Enter
+      const menu   = document.getElementById('menu');
+      const infoEl = document.getElementById('info');
+      const items  = Array.from(menu.querySelectorAll('button'));
       let idx = 0;
 
-      function debug(msg) {
-        bus.send({ type:'debug', msg });
-      }
-
-      // **2) When both DOM & image are ready, show menu & catcher**
-      let domReady=false, imgReady=false;
-      function tryInit() {
-        if (domReady && imgReady) {
-          debug('initMenu');
-          catcher.style.display = 'block';
-          menu.style.display    = 'flex';
+      document.addEventListener('keydown', e => {
+        if (e.key==='ArrowUp' || e.key==='ArrowDown') {
+          menu.style.display = 'flex';
           idx = 0; items[idx].focus();
-          catcher.focus();
-        }
-      }
-      window.addEventListener('DOMContentLoaded', () => { domReady=true; debug('DOM loaded'); tryInit(); });
-      splashImg.addEventListener('load',         () => { imgReady=true; debug('Image loaded'); tryInit(); });
-
-      // **3) D-pad & selection**
-      catcher.addEventListener('keydown', e => {
-        debug(`keydown ${e.keyCode}`);
-        e.preventDefault(); e.stopPropagation();
-        if (e.keyCode===38||e.keyCode===40) {
-          idx = e.keyCode===38
-            ? (idx+items.length-1)%items.length
-            : (idx+1)%items.length;
+          e.preventDefault();
+        } else if (menu.style.display==='flex') {
+          if (e.key==='ArrowLeft') {
+            idx = (idx + items.length - 1) % items.length;
+          } else if (e.key==='ArrowRight') {
+            idx = (idx + 1) % items.length;
+          } else if (e.key==='Enter') {
+            items[idx].click();
+          } else if (e.key==='Escape') {
+            menu.style.display = 'none';
+          }
           items[idx].focus();
-          debug(`focus idx=${idx}`);
-        }
-        else if (e.keyCode===13) {
-          debug(`enter idx=${idx}`);
-          items[idx].click();
-        }
-        else if (e.keyCode===8||e.keyCode===10009) {
-          debug('back pressed');
+          e.preventDefault();
         }
       });
 
-      // **4) Buttons**
-      document.getElementById('menu-stream').addEventListener('click', () => {
-        debug('Stream clicked');
-        splash.style.display='none';
-        bus.send({type:'start'});
-        catcher.focus();
-      });
-      document.getElementById('menu-about').addEventListener('click', () => {
-        debug('About clicked');
-        info.textContent =
-          `Hi Linda!\nHier ist ein selbstgebauter Player.\nLieben Gruß, Christoph\n\n`+
-          `Local Time: ${new Date().toLocaleTimeString()}`;
-        info.style.display='block';
-        catcher.focus();
-      });
+      // 5) “Stream” button: send a start message
+      document.getElementById('menu-stream')
+        .addEventListener('click', () => {
+          bus.send({ type: 'start' });
+          menu.style.display = 'none';
+        });
+
+      // 6) “About” button: show an on-screen notice
+      document.getElementById('menu-about')
+        .addEventListener('click', () => {
+          const now = new Date().toLocaleTimeString();
+          document.getElementById('info').textContent =
+            Hi Linda!\nHier ist ein selbstgebauter Player.\n +
+            Lieben Gruß, Christoph\n\n +
+            Local Time: ${now};
+          infoEl.style.display = 'block';
+          setTimeout(() => infoEl.style.display = 'none', 5000);
+          menu.style.display = 'none';
+        });
     </script>
   </body>
 </html>
