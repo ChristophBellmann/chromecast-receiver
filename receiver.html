@@ -30,10 +30,6 @@
       #splash #version {
         color:white; margin-top:1em; font-size:1.2em;
       }
-      /* elapsed timer display */
-      #timer {
-        color:#88f; margin-top:0.5em; font-size:1em;
-      }
       /* 3) hide CAF player under UI */
       cast-media-player { display:none; }
       /* 4) menu */
@@ -44,7 +40,7 @@
         background:rgba(0,0,0,0.7);
         padding:1em; border-radius:8px;
         gap:1em; z-index:20;
-        flex-direction:column;
+        display:flex;
       }
       #menu button {
         background:white; color:black; border:none;
@@ -63,11 +59,10 @@
     <!-- 1) cheese wheel over everything -->
     <canvas id="cheeseCanvas"></canvas>
 
-    <!-- 2) splash + version + timer -->
+    <!-- 2) splash + version -->
     <div id="splash">
       <img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Loading…">
       <div id="version">v0.2 + 🧀</div>
-      <div id="timer">Elapsed: 0.0 s</div>
     </div>
 
     <!-- 3) CAF player placeholder -->
@@ -83,71 +78,55 @@
     <div id="info"></div>
 
     <script>
-      // === rotating cheese wheel & timer (1 rotation per second) ===
+      // === rotating cheese wheel ===
       const canvas = document.getElementById('cheeseCanvas');
-      const ctx    = canvas.getContext('2d');
+      const ctx = canvas.getContext('2d');
       function resize() {
-        canvas.width  = window.innerWidth;
+        canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
       }
       window.addEventListener('resize', resize);
       resize();
-
       let angle = 0;
-      let startTs = null;
-      function drawCheese(ts) {
-        if (startTs === null) startTs = ts;
-        const elapsed = (ts - startTs) / 1000;
-        // update timer display
-        document.getElementById('timer').textContent = 
-          'Elapsed: ' + elapsed.toFixed(1) + ' s';
-
-        // compute delta since last frame
-        const deltaS = (ts - (angle._lastTs||ts)) / 1000;
-        angle._lastTs = ts;
-        // one full rotation per second: 2π rad/s
-        angle.val = (angle.val||0) + deltaS * 2 * Math.PI;
-
+      function drawCheese() {
         const w = canvas.width, h = canvas.height;
         const r = Math.min(w,h)*0.3, cx = w/2, cy = h/2;
         ctx.clearRect(0,0,w,h);
         ctx.save();
         ctx.translate(cx,cy);
-        ctx.rotate(angle.val);
+        ctx.rotate(angle);
         ctx.translate(-cx,-cy);
-
         // wheel
         ctx.beginPath();
         ctx.arc(cx,cy,r,0,2*Math.PI);
         ctx.fillStyle = '#2277cc';
         ctx.fill();
-        ctx.lineWidth   = r*0.05;
+        ctx.lineWidth = r*0.05;
         ctx.strokeStyle = '#1155aa';
         ctx.stroke();
-
         // holes
         const count = 12;
-        for (let i=0; i<count; i++){
-          const t  = (i/count)*2*Math.PI;
+        for(let i=0;i<count;i++){
+          const t = i/count*2*Math.PI;
           const hr = r*(0.2+0.1*Math.random());
-          const hx = cx + Math.cos(t)*r*0.6*(0.7+0.3*Math.random());
-          const hy = cy + Math.sin(t)*r*0.6*(0.7+0.3*Math.random());
+          const hx = cx+Math.cos(t)*r*0.6*(0.7+0.3*Math.random());
+          const hy = cy+Math.sin(t)*r*0.6*(0.7+0.3*Math.random());
           ctx.beginPath();
           ctx.arc(hx,hy,hr,0,2*Math.PI);
           ctx.fillStyle = '#114477';
           ctx.fill();
         }
         ctx.restore();
-
+        angle += 0.01;
         requestAnimationFrame(drawCheese);
       }
-      requestAnimationFrame(drawCheese);
+      drawCheese();
 
       // === CAF + menu + auto-start after 20s ===
       const STREAM_NS = 'urn:x-cast:com.example.stream';
-      const context   = cast.framework.CastReceiverContext.getInstance();
+      const context = cast.framework.CastReceiverContext.getInstance();
       const playerManager = context.getPlayerManager();
-      const options       = new cast.framework.CastReceiverOptions();
+      const options = new cast.framework.CastReceiverOptions();
       options.disableIdleTimeout = true;
       const cfg = playerManager.getPlaybackConfig();
       cfg.autoResumeNumberOfSegments = 1;
@@ -163,10 +142,10 @@
         () => document.getElementById('splash').style.display = 'none'
       );
 
-      const bus    = context.getCastMessageBus(STREAM_NS);
-      const menu   = document.getElementById('menu');
+      const bus = context.getCastMessageBus(STREAM_NS);
+      const menu = document.getElementById('menu');
       const infoEl = document.getElementById('info');
-      const items  = Array.from(menu.querySelectorAll('button'));
+      const items = Array.from(menu.querySelectorAll('button'));
       let idx = 0;
 
       document.addEventListener('keydown', e => {
@@ -193,10 +172,11 @@
         document.getElementById('splash').style.display='none';
         menu.style.display='none';
       });
+
       document.getElementById('menu-about').addEventListener('click',() => {
         const now = new Date().toLocaleTimeString();
         infoEl.textContent =
-          `Hi Linda!\nHier ist ein selbstgebauter Player.\nLieben Gruß, Christoph\n\nLocal Time: ${now}`;
+          Hi Linda!\nHier ist ein selbstgebauter Player.\nLieben Gruß, Christoph\n\nLocal Time: ${now};
         infoEl.style.display='block';
         setTimeout(()=>infoEl.style.display='none',5000);
         menu.style.display='none';
@@ -206,7 +186,7 @@
       setTimeout(() => {
         bus.send({type:'start'});
         document.getElementById('splash').style.display='none';
-      }, 20000);
+      }, 20_000);
     </script>
   </body>
 </html>
