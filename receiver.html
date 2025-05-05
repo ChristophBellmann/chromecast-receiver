@@ -6,64 +6,48 @@
     <script src="https://www.gstatic.com/cast/sdk/libs/receiver/2.0.0/cast_receiver.js"></script>
     <style>
       html, body {
-        margin: 0; padding: 0; width: 100%; height: 100%;
-        background: black; overflow: hidden;
+        margin:0; padding:0; width:100%; height:100%;
+        background:black; overflow:hidden;
       }
+      body:focus { outline: none; }
       cast-media-player {
         display: none;
-        width: 100%; height: 100%;
-        position: absolute; top: 0; left: 0;
+        width:100%; height:100%;
+        position:absolute; top:0; left:0;
       }
-      /* Menu overlay */
       #menu {
-        position: absolute; top: 40%; left: 50%;
-        transform: translate(-50%, -50%);
-        display: flex; gap: 2rem;
-        z-index: 1000;
+        position:absolute; top:40%; left:50%;
+        transform:translate(-50%,-50%); display:flex;
+        gap:2rem; z-index:1000;
       }
       #menu button {
-        font-size: 2rem; padding: 1rem 2rem;
-        background: rgba(255,255,255,0.1);
-        border: 2px solid white; color: white;
+        font-size:2rem; padding:1rem 2rem;
+        background:rgba(255,255,255,0.1);
+        border:2px solid white; color:white;
       }
       #menu button:focus {
-        outline: 3px solid #0af;
+        outline:3px solid #0af;
       }
-      /* About dialog */
-      #about {
-        position: absolute; top: 50%; left: 50%;
-        transform: translate(-50%, -50%);
-        background: rgba(0,0,0,0.8);
-        color: white; padding: 2rem;
-        border-radius: 8px; display: none; z-index: 1001;
-        max-width: 80%; text-align: center;
+      #about, #info {
+        position:absolute; top:50%; left:50%;
+        transform:translate(-50%,-50%);
+        background:rgba(0,0,0,0.8); color:white;
+        padding:2rem; border-radius:8px;
+        display:none; z-index:1001;
+        max-width:80%; text-align:center;
       }
-      #about button {
-        margin-top: 1rem; font-size: 1.2rem; padding: 0.5rem 1rem;
-      }
-      /* Info dialog */
-      #info {
-        position: absolute; top: 50%; left: 50%;
-        transform: translate(-50%, -50%);
-        background: rgba(0,0,0,0.8);
-        color: white; padding: 2rem;
-        border-radius: 8px; display: none; z-index: 1002;
-        max-width: 80%; text-align: left;
-        font-family: monospace;
-      }
-      #info div {
-        margin: 0.5rem 0;
-      }
-      #info button {
-        margin-top: 1rem; font-size: 1rem; padding: 0.5rem 1rem;
+      #info { text-align:left; font-family:monospace; }
+      #about button, #info button {
+        margin-top:1rem; font-size:1.2rem; padding:0.5rem 1rem;
       }
     </style>
   </head>
-  <body>
+  <!-- make body focusable -->
+  <body tabindex="0">
     <div id="menu">
       <button id="stream-btn" tabindex="1">Stream</button>
-      <button id="about-btn" tabindex="2">About</button>
-      <button id="info-btn" tabindex="3">Info</button>
+      <button id="about-btn"  tabindex="2">About</button>
+      <button id="info-btn"   tabindex="3">Info</button>
     </div>
 
     <div id="about">
@@ -77,7 +61,7 @@
       <div id="ping">Ping: -- ms</div>
       <div id="time">Local Time: --:--:--</div>
       <div id="delay">Stream Delay: -- s</div>
-      <div id="video-info">Video: -- × --</div>
+      <div id="video-info">Video: --×--</div>
       <div id="audio-info">Audio: AAC 192 kbps, Stereo</div>
       <button id="info-close" tabindex="5">Close</button>
     </div>
@@ -85,28 +69,31 @@
     <cast-media-player id="player"></cast-media-player>
 
     <script>
-      const context = cast.framework.CastReceiverContext.getInstance();
+      // ensure the body has focus to capture remote keys
+      window.addEventListener('load', () => {
+        document.body.focus();
+      });
+
+      const context       = cast.framework.CastReceiverContext.getInstance();
       const playerManager = context.getPlayerManager();
 
-      let streamUrl = null;
-      let startTs   = null;
-
-      const menu       = document.getElementById('menu');
-      const aboutBox   = document.getElementById('about');
-      const infoBox    = document.getElementById('info');
-      const buttons    = Array.from(menu.querySelectorAll('button'));
+      let streamUrl = null, startTs = null;
+      const menu     = document.getElementById('menu');
+      const aboutBox = document.getElementById('about');
+      const infoBox  = document.getElementById('info');
+      const buttons  = Array.from(menu.querySelectorAll('button'));
       let idx = 0;
 
-      // Show menu on Up/Down
-      document.body.addEventListener('keydown', e => {
+      // show menu on Up/Down
+      window.addEventListener('keydown', e => {
         if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
           menu.style.display = 'flex';
           idx = 0;
           buttons[idx].focus();
         }
       });
-      // Navigate menu
-      document.body.addEventListener('keydown', e => {
+      // navigate menu when visible
+      window.addEventListener('keydown', e => {
         if (menu.style.display !== 'none') {
           if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
             idx = (idx + buttons.length - 1) % buttons.length;
@@ -120,6 +107,7 @@
         }
       });
 
+      // menu button handlers
       document.getElementById('stream-btn').addEventListener('click', () => {
         menu.style.display = 'none';
       });
@@ -133,32 +121,28 @@
       });
 
       document.getElementById('info-btn').addEventListener('click', () => {
-        // populate info fields
-        const now       = new Date();
-        document.getElementById('time').textContent  = `Local Time: ${now.toLocaleTimeString()}`;
-        // Ping the stream URL
+        // populate Info
+        const now = new Date();
+        document.getElementById('time').textContent  = 
+          `Local Time: ${now.toLocaleTimeString()}`;
         if (streamUrl) {
           const t0 = Date.now();
           fetch(streamUrl, { method: 'HEAD' }).then(() => {
-            const ping = Date.now() - t0;
-            document.getElementById('ping').textContent = `Ping: ${ping} ms`;
+            document.getElementById('ping').textContent = 
+              `Ping: ${Date.now() - t0} ms`;
           }).catch(_=>{
             document.getElementById('ping').textContent = 'Ping: error';
           });
         }
-        // Delay
         if (startTs) {
-          const delay = ((Date.now() - startTs)/1000).toFixed(2);
-          document.getElementById('delay').textContent = `Stream Delay: ${delay} s`;
+          document.getElementById('delay').textContent = 
+            `Stream Delay: ${((Date.now()-startTs)/1000).toFixed(2)} s`;
         }
-        // Video resolution
         const videoEl = document.querySelector('video');
         if (videoEl) {
-          document.getElementById('video-info').textContent =
+          document.getElementById('video-info').textContent = 
             `Video: ${videoEl.videoWidth}×${videoEl.videoHeight}`;
         }
-        // Audio info is static based on our stream config
-
         infoBox.style.display = 'block';
         document.getElementById('info-close').focus();
       });
@@ -171,8 +155,8 @@
       playerManager.setMessageInterceptor(
         cast.framework.messages.MessageType.LOAD,
         loadRequestData => {
-          menu.style.display    = 'none';
-          aboutBox.style.display = 'none';
+          menu.style.display      = 'none';
+          aboutBox.style.display  = 'none';
           infoBox.style.display   = 'none';
           document.getElementById('player').style.display = 'block';
 
@@ -182,7 +166,7 @@
             streamUrl = loadRequestData.media.contentId;
             startTs   = parseInt(url.searchParams.get('ts'));
             if (!isNaN(startTs)) {
-              loadRequestData.currentTime = (Date.now() - startTs)/1000;
+              loadRequestData.currentTime = (Date.now()-startTs)/1000;
             }
           } catch (e) {}
           return loadRequestData;
@@ -193,12 +177,12 @@
       playerManager.addEventListener(
         cast.framework.events.EventType.PLAYING, () => {
           if (startTs) {
-            playerManager.seek((Date.now() - startTs)/1000);
+            playerManager.seek((Date.now()-startTs)/1000);
           }
         }
       );
 
-      // Start receiver
+      // Start
       const options = new cast.framework.CastReceiverOptions();
       options.disableIdleTimeout = true;
       context.start(options);
