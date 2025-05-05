@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Low-Latency Receiver + Cheese Wheel + Auto-Start v0.3</title>
+    <title>Low-Latency Receiver + Cheese Wheel + Auto-Start v0.4</title>
     <!-- CAF Receiver SDK v3 + D-Pad support -->
     <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
     <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework_controls_dpad_tv.js"></script>
@@ -65,7 +65,7 @@
     <!-- 2) splash + version -->
     <div id="splash">
       <img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Loading…">
-      <div id="version">v0.3 + 🧀</div>
+      <div id="version">v0.4 + 🧀</div>
     </div>
 
     <!-- 3) CAF player -->
@@ -90,7 +90,7 @@
         bus.send({ type:'debug', msg });
       }
 
-      // === rotating cheese wheel (time-based) ===
+      // === rotating cheese wheel (1 rotation per second) ===
       const canvas = document.getElementById('cheeseCanvas');
       const ctx    = canvas.getContext('2d');
       function resize() {
@@ -107,8 +107,8 @@
         const deltaS = (ts - lastTs) / 1000;
         lastTs = ts;
 
-        // rotate at ~5° per second → 5*(π/180) ≈ 0.0873 rad/s
-        angle += deltaS * 0.0873;
+        // one full rotation per second → 2π rad/s
+        angle += deltaS * 2 * Math.PI;
 
         const w = canvas.width, h = canvas.height;
         const r = Math.min(w,h)*0.3, cx = w/2, cy = h/2;
@@ -159,7 +159,7 @@
         req => { req.autoplay = true; return req; }
       );
       context.start(options);
-      debug('CAF receiver started v0.3');
+      debug('CAF receiver started v0.4');
 
       // hide splash on real media load
       playerManager.addEventListener(
