@@ -12,13 +12,13 @@
         width:100%; height:100%;
         background:black; overflow:hidden;
       }
-      /* 1) rotating cheese wheel canvas, over splash */
+      /* 1) rotating cheese wheel */
       #cheeseCanvas {
         position:absolute; inset:0;
         z-index:11;
         pointer-events:none;
       }
-      /* 2) splash */
+      /* 2) splash overlay */
       #splash {
         position:absolute; inset:0;
         display:flex; flex-direction:column;
@@ -30,10 +30,10 @@
       #splash #version {
         color:white; margin-top:1em; font-size:1.2em;
       }
-      /* 3) timer under the wheel */
+      /* 3) timer below wheel */
       #timer {
         position:absolute;
-        top:60%; /* slightly below center */
+        top:60%;    /* just below center */
         left:50%;
         transform:translateX(-50%);
         color:#88f;
@@ -78,7 +78,7 @@
       <div id="version">v0.2 + 🧀</div>
     </div>
 
-    <!-- 3) timer below wheel -->
+    <!-- 3) timer -->
     <div id="timer">Elapsed: 0.0 s</div>
 
     <!-- 4) CAF player -->
@@ -94,12 +94,10 @@
     <div id="info"></div>
 
     <script>
-      // Force focus so key events fire
-      window.addEventListener('load', () => {
-        document.body.focus();
-      });
+      // 0) ensure key events fire
+      window.addEventListener('load', ()=>document.body.focus());
 
-      // === rotating cheese wheel & timer (1 rotation per 5s) ===
+      // 1) Draw cheese wheel & timer: one full turn every 5 seconds
       const canvas = document.getElementById('cheeseCanvas');
       const ctx    = canvas.getContext('2d');
       const timerEl = document.getElementById('timer');
@@ -115,22 +113,20 @@
       function drawCheese(ts) {
         if (startTs === null) startTs = ts;
         const elapsedS = (ts - startTs) / 1000;
+        // update timer
         timerEl.textContent = 'Elapsed: ' + elapsedS.toFixed(1) + ' s';
-
-        // compute angle: full circle every 5s
+        // angle cycles 0→2π every 5s
         const angle = (elapsedS % 5) * (2 * Math.PI / 5);
 
         const w = canvas.width, h = canvas.height;
         const r = Math.min(w,h) * 0.3;
         const cx = w/2, cy = h/2;
-
         ctx.clearRect(0,0,w,h);
         ctx.save();
         ctx.translate(cx,cy);
         ctx.rotate(angle);
         ctx.translate(-cx,-cy);
-
-        // draw wheel
+        // wheel
         ctx.beginPath();
         ctx.arc(cx,cy,r,0,2*Math.PI);
         ctx.fillStyle   = '#2277cc';
@@ -138,42 +134,39 @@
         ctx.lineWidth   = r * 0.05;
         ctx.strokeStyle = '#1155aa';
         ctx.stroke();
-
-        // draw holes
-        for (let i = 0; i < 12; i++) {
-          const t  = (i/12) * 2 * Math.PI;
-          const hr = r * (0.2 + 0.1 * Math.random());
-          const hx = cx + Math.cos(t) * r * 0.6 * (0.7 + 0.3 * Math.random());
-          const hy = cy + Math.sin(t) * r * 0.6 * (0.7 + 0.3 * Math.random());
+        // holes
+        for (let i=0; i<12; i++){
+          const t  = (i/12)*2*Math.PI;
+          const hr = r*(0.2+0.1*Math.random());
+          const hx = cx + Math.cos(t)*r*0.6*(0.7+0.3*Math.random());
+          const hy = cy + Math.sin(t)*r*0.6*(0.7+0.3*Math.random());
           ctx.beginPath();
-          ctx.arc(hx, hy, hr, 0, 2 * Math.PI);
+          ctx.arc(hx,hy,hr,0,2*Math.PI);
           ctx.fillStyle = '#114477';
           ctx.fill();
         }
-
         ctx.restore();
         requestAnimationFrame(drawCheese);
       }
       requestAnimationFrame(drawCheese);
 
-      // === CAF initialization + menu + auto-start ===
+      // 2) CAF init + menu + auto-start
       const STREAM_NS = 'urn:x-cast:com.example.stream';
       const context   = cast.framework.CastReceiverContext.getInstance();
       const mgr       = context.getPlayerManager();
-      const options   = new cast.framework.CastReceiverOptions();
-      options.disableIdleTimeout = true;
-      const cfg       = mgr.getPlaybackConfig();
+      const opts      = new cast.framework.CastReceiverOptions();
+      opts.disableIdleTimeout = true;
+      const cfg = mgr.getPlaybackConfig();
       cfg.autoResumeNumberOfSegments = 1;
       mgr.setPlaybackConfig(cfg);
       mgr.setMessageInterceptor(
         cast.framework.messages.MessageType.LOAD,
         req => { req.autoplay = true; return req; }
       );
-      context.start(options);
-
+      context.start(opts);
       mgr.addEventListener(
         cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
-        () => document.getElementById('splash').style.display = 'none'
+        ()=>document.getElementById('splash').style.display='none'
       );
 
       const bus    = context.getCastMessageBus(STREAM_NS);
@@ -183,39 +176,38 @@
       let idx      = 0;
 
       document.addEventListener('keydown', e => {
-        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-          menu.style.display = 'flex';
-          idx = 0; items[idx].focus();
+        if (e.key==='ArrowUp'||e.key==='ArrowDown') {
+          menu.style.display='flex';
+          idx=0; items[idx].focus();
           e.preventDefault();
-        } else if (menu.style.display === 'flex') {
-          if (e.key === 'ArrowLeft')      idx = (idx + items.length - 1) % items.length;
-          else if (e.key === 'ArrowRight') idx = (idx + 1) % items.length;
-          else if (e.key === 'Enter')      items[idx].click();
-          else if (e.key === 'Escape')     menu.style.display = 'none';
+        } else if (menu.style.display==='flex') {
+          if (e.key==='ArrowLeft')      idx=(idx+items.length-1)%items.length;
+          else if (e.key==='ArrowRight') idx=(idx+1)%items.length;
+          else if (e.key==='Enter')      items[idx].click();
+          else if (e.key==='Escape')     menu.style.display='none';
           items[idx].focus();
           e.preventDefault();
         }
       });
 
-      document.getElementById('menu-stream').addEventListener('click', () => {
-        bus.send({ type:'start' });
-        document.getElementById('splash').style.display = 'none';
-        menu.style.display = 'none';
+      document.getElementById('menu-stream').addEventListener('click', ()=>{
+        bus.send({type:'start'});
+        document.getElementById('splash').style.display='none';
+        menu.style.display='none';
       });
-      document.getElementById('menu-about').addEventListener('click', () => {
-        const now = new Date().toLocaleTimeString();
-        infoEl.textContent =
+      document.getElementById('menu-about').addEventListener('click', ()=>{
+        const now=new Date().toLocaleTimeString();
+        infoEl.textContent=
           `Hi Linda!\nHier ist ein selbstgebauter Player.\nLieben Gruß, Christoph\n\nLocal Time: ${now}`;
-        infoEl.style.display = 'block';
-        setTimeout(() => infoEl.style.display = 'none', 5000);
-        menu.style.display = 'none';
+        infoEl.style.display='block';
+        setTimeout(()=>infoEl.style.display='none',5000);
+        menu.style.display='none';
       });
 
-      // auto-start after 20 seconds
-      setTimeout(() => {
-        bus.send({ type:'start' });
-        document.getElementById('splash').style.display = 'none';
-      }, 20000);
+      setTimeout(()=>{
+        bus.send({type:'start'});
+        document.getElementById('splash').style.display='none';
+      },20000);
     </script>
   </body>
 </html>
