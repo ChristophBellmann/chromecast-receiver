@@ -2,35 +2,44 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Low-Latency Receiver + Remote-Start</title>
+    <title>Low-Latency Receiver + Remote-Start + Cheese Wheel</title>
     <!-- CAF Receiver SDK v3 + D-Pad support -->
     <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
     <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework_controls_dpad_tv.js"></script>
     <style>
-      html, body { margin:0; padding:0; width:100%; height:100%; background:black; }
+      html, body {
+        margin:0; padding:0;
+        width:100%; height:100%;
+        background:black; overflow:hidden;
+      }
+      /* rotating cheese wheel canvas */
+      #cheeseCanvas {
+        position:absolute; inset:0;
+        z-index:1;
+      }
       /* splash */
       #splash {
-        position:absolute; inset:0; display:flex;
+        position:absolute; inset:0;
+        display:flex; flex-direction:column;
         align-items:center; justify-content:center;
-        background:black; z-index:10;
+        background:rgba(0,0,0,0.8); z-index:10;
       }
       #splash img { max-width:80%; }
-      #splash #version { color:white; margin-top:1em; }
-      /* player */
+      #splash #version {
+        color:white; margin-top:1em; font-size:1.2em;
+      }
+      /* CAF player (hidden under cheese wheel) */
       cast-media-player {
-        position:absolute; inset:0; width:100%; height:100%;
-        --media-background-color:black;
-        --media-splash-image:url('https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png');
-        --media-splash-image-size:contain;
-        --media-splash-image-position:center center;
-        --media-control-bar-display:none;
+        display:none;
       }
       /* menu */
       #menu {
         position:absolute; top:10%; left:50%;
         transform:translateX(-50%);
-        display:none; background:rgba(0,0,0,0.7);
-        padding:1em; border-radius:8px; gap:1em; z-index:20;
+        display:none;
+        background:rgba(0,0,0,0.7);
+        padding:1em; border-radius:8px;
+        gap:1em; z-index:20;
         display:flex;
       }
       #menu button {
@@ -41,98 +50,131 @@
       #info {
         position:absolute; bottom:5%; left:5%;
         background:rgba(0,0,0,0.7); color:white;
-        padding:1em; white-space:pre-line; z-index:20;
-        display:none; font-size:0.9em;
+        padding:1em; white-space:pre-line;
+        z-index:20; display:none; font-size:0.9em;
       }
     </style>
   </head>
   <body>
+    <!-- cheese wheel background -->
+    <canvas id="cheeseCanvas"></canvas>
+
+    <!-- splash + version -->
     <div id="splash">
       <img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Loading…">
-      <div id="version">v0.1</div>
+      <div id="version">v0.1 + 🧀</div>
     </div>
 
+    <!-- invisible CAF player placeholder -->
     <cast-media-player id="player"></cast-media-player>
 
+    <!-- menu -->
     <div id="menu">
       <button id="menu-stream">Stream</button>
       <button id="menu-about">About</button>
     </div>
 
+    <!-- info -->
     <div id="info"></div>
 
     <script>
-      const STREAM_NS = 'urn:x-cast:com.example.stream';
+      // === rotating cheese wheel ===
+      const canvas = document.getElementById('cheeseCanvas');
+      const ctx    = canvas.getContext('2d');
+      function resize() {
+        canvas.width  = window.innerWidth;
+        canvas.height = window.innerHeight;
+      }
+      window.addEventListener('resize', resize);
+      resize();
+      let angle = 0;
+      function drawCheese() {
+        const w = canvas.width, h = canvas.height;
+        const r = Math.min(w,h)*0.3, cx = w/2, cy = h/2;
+        ctx.clearRect(0,0,w,h);
+        ctx.save();
+        ctx.translate(cx,cy);
+        ctx.rotate(angle);
+        ctx.translate(-cx,-cy);
+        // wheel
+        ctx.beginPath();
+        ctx.arc(cx,cy,r,0,2*Math.PI);
+        ctx.fillStyle = '#2277cc';
+        ctx.fill();
+        ctx.lineWidth = r*0.05;
+        ctx.strokeStyle = '#1155aa';
+        ctx.stroke();
+        // holes
+        const count = 12;
+        for(let i=0;i<count;i++){
+          const t = i/count * 2*Math.PI;
+          const hr = r*(0.2+0.1*Math.random());
+          const hx = cx + Math.cos(t)*r*0.6*(0.7+0.3*Math.random());
+          const hy = cy + Math.sin(t)*r*0.6*(0.7+0.3*Math.random());
+          ctx.beginPath();
+          ctx.arc(hx,hy,hr,0,2*Math.PI);
+          ctx.fillStyle = '#114477';
+          ctx.fill();
+        }
+        ctx.restore();
+        angle += 0.01;
+        requestAnimationFrame(drawCheese);
+      }
+      drawCheese();
 
-      // 1) Initialize CAF
-      const context       = cast.framework.CastReceiverContext.getInstance();
+      // === existing CAF & menu logic ===
+      const STREAM_NS = 'urn:x-cast:com.example.stream';
+      const context = cast.framework.CastReceiverContext.getInstance();
       const playerManager = context.getPlayerManager();
-      const options       = new cast.framework.CastReceiverOptions();
+      const options = new cast.framework.CastReceiverOptions();
       options.disableIdleTimeout = true;
-      // low-latency resume after 1 segment
       const cfg = playerManager.getPlaybackConfig();
       cfg.autoResumeNumberOfSegments = 1;
       playerManager.setPlaybackConfig(cfg);
-      // force autoplay
       playerManager.setMessageInterceptor(
         cast.framework.messages.MessageType.LOAD,
         req => { req.autoplay = true; return req; }
       );
       context.start(options);
-
-      // 2) Hide splash on first load complete
       playerManager.addEventListener(
         cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
         () => document.getElementById('splash').style.display = 'none'
       );
-
-      // 3) Create message bus for “start” command
       const bus = context.getCastMessageBus(STREAM_NS);
-
-      // 4) Menu logic: open on Up/Down, navigate with Left/Right, select with Enter
-      const menu   = document.getElementById('menu');
+      const menu = document.getElementById('menu');
       const infoEl = document.getElementById('info');
-      const items  = Array.from(menu.querySelectorAll('button'));
+      const items = Array.from(menu.querySelectorAll('button'));
       let idx = 0;
-
       document.addEventListener('keydown', e => {
-        if (e.key==='ArrowUp' || e.key==='ArrowDown') {
+        if (e.key==='ArrowUp'||e.key==='ArrowDown') {
           menu.style.display = 'flex';
           idx = 0; items[idx].focus();
           e.preventDefault();
         } else if (menu.style.display==='flex') {
-          if (e.key==='ArrowLeft') {
-            idx = (idx + items.length - 1) % items.length;
-          } else if (e.key==='ArrowRight') {
-            idx = (idx + 1) % items.length;
-          } else if (e.key==='Enter') {
+          if (e.key==='ArrowLeft')
+            idx = (idx+items.length-1)%items.length;
+          else if (e.key==='ArrowRight')
+            idx = (idx+1)%items.length;
+          else if (e.key==='Enter')
             items[idx].click();
-          } else if (e.key==='Escape') {
-            menu.style.display = 'none';
-          }
+          else if (e.key==='Escape')
+            menu.style.display='none';
           items[idx].focus();
           e.preventDefault();
         }
       });
-
-      // 5) “Stream” button: send a start message
       document.getElementById('menu-stream')
-        .addEventListener('click', () => {
-          bus.send({ type: 'start' });
-          menu.style.display = 'none';
+        .addEventListener('click',() => {
+          bus.send({type:'start'}); menu.style.display='none';
         });
-
-      // 6) “About” button: show an on-screen notice
       document.getElementById('menu-about')
-        .addEventListener('click', () => {
-          const now = new Date().toLocaleTimeString();
-          document.getElementById('info').textContent =
-            Hi Linda!\nHier ist ein selbstgebauter Player.\n +
-            Lieben Gruß, Christoph\n\n +
-            Local Time: ${now};
-          infoEl.style.display = 'block';
-          setTimeout(() => infoEl.style.display = 'none', 5000);
-          menu.style.display = 'none';
+        .addEventListener('click',() => {
+          const now=new Date().toLocaleTimeString();
+          infoEl.textContent =
+            `Hi Linda!\nHier ist ein selbstgebauter Player.\nLieben Gruß, Christoph\n\nLocal Time: ${now}`;
+          infoEl.style.display='block';
+          setTimeout(()=>infoEl.style.display='none',5000);
+          menu.style.display='none';
         });
     </script>
   </body>
