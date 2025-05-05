@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Low‑Latency Receiver + Cheese Wheel + Auto‑Start v0.5</title>
+    <title>Low‑Latency Receiver + Cheese Wheel + Auto‑Start v0.6</title>
     <!-- CAF Receiver SDK v3 + D‑Pad support -->
     <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
     <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework_controls_dpad_tv.js"></script>
@@ -20,8 +20,9 @@
       cast-media-player{display:none}
       /* 5) menu sits on top */
       #menu{position:absolute;top:10%;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.7);padding:1em;border-radius:8px;gap:1em;z-index:20;display:none;flex-direction:row}
-      #menu button{background:#fff;color:#000;border:none;padding:.5em 1em;font-size:1em}
+      #menu button{background:#fff;color:#000;border:none;padding:.5em 1em;font-size:1em;transition:background .1s}
       #menu button:focus{outline:2px solid #0af}
+      #menu button.flash{background:#0f0 !important}
       /* 6) simple info box (bottom‑left) */
       #info{position:absolute;bottom:5%;left:5%;background:rgba(0,0,0,.7);color:#fff;padding:1em;white-space:pre-line;z-index:30;font-size:.9em;display:none}
     </style>
@@ -34,7 +35,7 @@
     <!-- splash + version -->
     <div id="splash">
       <img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Loading…" />
-      <div id="version">v0.5 + 🧀</div>
+      <div id="version">v0.6 + 🧀</div>
     </div>
 
     <!-- timer -->
@@ -66,11 +67,16 @@
       window.addEventListener('load', () => document.body.focus());
 
       /* ------------------------------------------------------------
-       * KEYBOARD / D‑PAD HANDLING (Left/Right nav, Enter executes)
+       * KEYBOARD / D‑PAD HANDLING (Left/Right nav, Enter executes + flash)
        * ---------------------------------------------------------- */
-      const menu      = document.getElementById('menu');
-      const buttons   = Array.from(menu.querySelectorAll('button'));
-      let currentIdx  = 0;
+      const menu    = document.getElementById('menu');
+      const buttons = Array.from(menu.querySelectorAll('button'));
+      let currentIdx = 0;
+
+      function flash(btn){
+        btn.classList.add('flash');
+        setTimeout(()=>btn.classList.remove('flash'),200);
+      }
 
       function handleKey(e){
         const { key } = e;
@@ -88,7 +94,10 @@
         if(menu.style.display === 'flex'){
           if(key === 'ArrowLeft')      currentIdx = (currentIdx + buttons.length - 1) % buttons.length;
           else if(key === 'ArrowRight')currentIdx = (currentIdx + 1) % buttons.length;
-          else if(key === 'Enter')     buttons[currentIdx].click();
+          else if(key === 'Enter'){
+            flash(buttons[currentIdx]);
+            buttons[currentIdx].click();
+          }
           else if(key === 'Escape')    menu.style.display = 'none';
 
           buttons[currentIdx].focus();
@@ -104,23 +113,22 @@
       const ctx     = canvas.getContext('2d');
       const timerEl = document.getElementById('timer');
 
-      let lastTs  = null;
-      let angle   = 0;
+      let lastTs = null;
+      let angle  = 0;
       const startTime = performance.now();
 
-      // pre‑compute hole positions once
       const holes = [];
       function generateHoles(){
         holes.length = 0;
         const w = canvas.width, h = canvas.height;
         const r = Math.min(w, h) * 0.3;
         const cx = w / 2, cy = h / 2;
-        for(let i = 0; i < HOLE_COUNT; i++){
-          const t  = (i / HOLE_COUNT) * 2 * Math.PI;
-          const hr = r * (0.15 + 0.05 * Math.random());
-          const hx = cx + Math.cos(t) * r * 0.6 * (0.8 + 0.2 * Math.random());
-          const hy = cy + Math.sin(t) * r * 0.6 * (0.8 + 0.2 * Math.random());
-          holes.push({hx, hy, hr});
+        for(let i=0;i<HOLE_COUNT;i++){
+          const t  = (i/HOLE_COUNT)*2*Math.PI;
+          const hr = r*(0.15+0.05*Math.random());
+          const hx = cx + Math.cos(t)*r*0.6*(0.8+0.2*Math.random());
+          const hy = cy + Math.sin(t)*r*0.6*(0.8+0.2*Math.random());
+          holes.push({hx,hy,hr});
         }
       }
       function resizeCanvas(){
@@ -132,16 +140,16 @@
       resizeCanvas();
 
       function draw(ts){
-        if(lastTs === null) lastTs = ts;
-        const deltaS = (ts - lastTs) / 1000;
+        if(lastTs===null) lastTs = ts;
+        const deltaS = (ts-lastTs)/1000;
         lastTs = ts;
-        angle = (angle + deltaS * (2 * Math.PI / ROTATION_PERIOD)) % (2 * Math.PI);
-        const elapsed = (performance.now() - startTime) / 1000;
+        angle = (angle + deltaS*(2*Math.PI/ROTATION_PERIOD)) % (2*Math.PI);
+        const elapsed = (performance.now()-startTime)/1000;
         timerEl.textContent = `Elapsed: ${elapsed.toFixed(1)} s`;
 
         const w = canvas.width, h = canvas.height;
-        const r = Math.min(w, h) * 0.3;
-        const cx = w / 2, cy = h / 2;
+        const r = Math.min(w,h)*0.3;
+        const cx = w/2, cy = h/2;
 
         ctx.clearRect(0,0,w,h);
         ctx.save();
@@ -149,7 +157,6 @@
         ctx.rotate(angle);
         ctx.translate(-cx,-cy);
 
-        // wheel body
         ctx.beginPath();
         ctx.arc(cx,cy,r,0,2*Math.PI);
         ctx.fillStyle = '#2277cc';
@@ -158,7 +165,6 @@
         ctx.strokeStyle = '#1155aa';
         ctx.stroke();
 
-        // holes
         ctx.fillStyle = '#114477';
         holes.forEach(({hx,hy,hr})=>{
           ctx.beginPath();
@@ -186,41 +192,41 @@
 
       mgr.setMessageInterceptor(
         cast.framework.messages.MessageType.LOAD,
-        req => (req.autoplay = true, req)
+        req=> (req.autoplay=true, req)
       );
       castCtx.start(opts);
       mgr.addEventListener(
         cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
-        () => document.getElementById('splash').style.display = 'none'
+        ()=> document.getElementById('splash').style.display='none'
       );
 
       /* ------------------------------------------------------------
        * MESSAGE BUS & MENU CALLBACKS
        * ---------------------------------------------------------- */
-      const bus = castCtx.getCastMessageBus(STREAM_NS);
+      const bus  = castCtx.getCastMessageBus(STREAM_NS);
       const info = document.getElementById('info');
 
-      document.getElementById('menu-stream').addEventListener('click', () => {
+      document.getElementById('menu-stream').addEventListener('click',() =>{
         bus.send({type:'start'});
         document.getElementById('splash').style.display='none';
         menu.style.display='none';
       });
-      document.getElementById('menu-about').addEventListener('click', () => {
-        info.textContent = 'Hi Linda!\nHier ist ein selbstgebauter Player.\nLieben Gruß, Christoph';
+      document.getElementById('menu-about').addEventListener('click', () =>{
+        info.textContent='Hi Linda!\nHier ist ein selbstgebauter Player.\nLieben Gruß, Christoph';
         info.style.display='block';
         setTimeout(()=>info.style.display='none',5000);
         menu.style.display='none';
       });
 
       /* ------------------------------------------------------------
-       * AUTO‑START AFTER 20 s
+       * AUTO‑START AFTER 20 s
        * ---------------------------------------------------------- */
       const autoStart = setTimeout(()=>{
         if(menu.style.display!=='flex'){
           bus.send({type:'start'});
           document.getElementById('splash').style.display='none';
         }
-      },AUTO_START_MS);
+      }, AUTO_START_MS);
       buttons.forEach(btn=>btn.addEventListener('focus',()=>clearTimeout(autoStart)));
     </script>
   </body>
