@@ -2,79 +2,44 @@
 <html>
 <head>
 <meta charset="utf-8" />
-<title>Low‑Latency Receiver + Cheese‑Wheel v3.0</title>
-
-<!-- Cast SDK -->
+<title>Low‑Latency Receiver + Cheese Wheel + Auto‑Start v2.5</title>
 <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
 <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework_controls_dpad_tv.js"></script>
-
 <style>
   :root{
-    --wheel:#f8c94c;         /* Käsegelb  */
-    --hole:#d88d23;          /* Löcher    */
-    --rim:#a66e18;           /* Rand      */
-    --popup-bg:#111;         /* Popup‑BG  */
-    --popup-line:#0af;       /* Popup‑Rahmen */
+    --wheel:#f8c94c;   /* Käsegelb */
+    --hole:#d88d23;
+    --wheel‑rim:#a66e18;
+    --popup‑bg:#111;
+    --popup‑border:#0af;
   }
-  /* Grundlayout */
-  html,body{
-    margin:0;padding:0;width:100%;height:100%;
-    overflow:hidden;background:#000;font-family:system-ui,sans-serif
-  }
-  /* Zeichen‑Canvas */
+  html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000;font-family:system-ui,sans-serif}
   #cheeseCanvas{position:absolute;inset:0;z-index:10}
-  /* Splash‑Bild */
-  #splash{
-    position:absolute;inset:0;
-    display:flex;flex-direction:column;align-items:center;justify-content:center;
-    background:rgba(0,0,0,.8);z-index:5
-  }
+  #splash{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,.8);z-index:5}
   #splash img{max-width:80%}
   #splash #version{color:#fff;margin-top:1em;font-size:1.2em}
-  /* Timer & Debug */
-  #timer{
-    position:absolute;top:60%;left:50%;transform:translateX(-50%);
-    color:#88f;font-size:1.2em;z-index:11;pointer-events:none
-  }
-  #debug{
-    position:absolute;top:72%;left:50%;transform:translateX(-50%);
-    color:#0f0;font-size:1em;z-index:12;pointer-events:none;
-    opacity:.7;transition:opacity .3s
-  }
-  /* Menü */
-  #menu{
-    position:absolute;top:8%;left:50%;transform:translateX(-50%);
-    background:rgba(0,0,0,.7);padding:1em;border-radius:8px;gap:1em;
-    z-index:20;display:flex;flex-direction:row
-  }
-  #menu button{
-    background:#fff;color:#000;border:none;padding:.5em 1em;font-size:1em;
-    transition:background .1s
-  }
+  #timer{position:absolute;top:60%;left:50%;transform:translateX(-50%);color:#88f;font-size:1.2em;z-index:11;pointer-events:none}
+  #debug{position:absolute;top:72%;left:50%;transform:translateX(-50%);color:#0f0;font-size:1em;z-index:12;pointer-events:none;opacity:.7;transition:opacity .3s}
+  cast-media-player{display:none}
+  #menu{position:absolute;top:8%;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.7);padding:1em;border-radius:8px;gap:1em;z-index:20;display:flex;flex-direction:row}
+  #menu button{background:#fff;color:#000;border:none;padding:.5em 1em;font-size:1em;transition:background .1s}
   #menu button:focus{outline:3px solid #0af}
   #menu button.flash{background:#0f0 !important}
-  cast-media-player{display:none}
 </style>
 </head>
 <body tabindex="0">
-
-<!-- Zeichenfläche -->
 <canvas id="cheeseCanvas"></canvas>
 
-<!-- Splash -->
 <div id="splash">
-  <img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Loading…">
-  <div id="version">v3.0 + 🧀</div>
+  <img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Loading…" />
+  <div id="version">v2.5 + 🧀</div>
 </div>
 
-<!-- Laufzeit‑Overlays -->
 <div id="timer">Elapsed: 0.0 s</div>
-<div id="debug">Bereit – keine Aktion</div>
+<div id="debug">Bereit – keine Aktion</div>
 
-<!-- (versteckter) Medienplayer -->
 <cast-media-player id="player"></cast-media-player>
 
-<!-- Menü -->
 <div id="menu">
   <button id="btn-stream">Stream</button>
   <button id="btn-p1">Popup 1</button>
@@ -83,148 +48,125 @@
 </div>
 
 <script>
-/* === Konstanten === */
-const ROTATION_PERIOD = 15;               // s für 1 U
-const AUTO_START_MS   = 20000;            // 20 s
-const HOLE_COUNT      = 12;
-const POPUP_DURATION  = 8000;             // ms
-const IDLE_TEXT       = 'Bereit – keine Aktion';
+/* ---------- Konstanten ---------- */
+const ROTATION_PERIOD=15, AUTO_START_MS=20000, HOLE_COUNT=12;
+const IDLE_TEXT='Bereit – keine Aktion';
 
-/* === DOM‑Kurzgriffe === */
-const $  = q => document.querySelector(q);
+const COLORS={
+  wheel:'#f8c94c',
+  hole :'#d88d23',
+  rim  :'#a66e18',
+  popupBg:'#111',
+  popupLine:'#0af'
+};
+
+/* ---------- DOM‑Hilfen ---------- */
+const $ = q => document.querySelector(q);
 const $$ = q => [...document.querySelectorAll(q)];
-
-const canvas  = $('#cheeseCanvas'), ctx = canvas.getContext('2d');
 const menu    = $('#menu');
 const buttons = $$('#menu button');
 const debugEl = $('#debug');
-
-/* === Debug‑Helpers === */
-let currentIdx = 0;
-function setIdle(){debugEl.textContent = IDLE_TEXT; debugEl.style.opacity = .7;}
-function showDebug(msg){debugEl.textContent = msg; debugEl.style.opacity = 1;
-                        clearTimeout(showDebug.t); showDebug.t = setTimeout(setIdle, 3000);}
-function flash(btn){btn.classList.add('flash'); setTimeout(()=>btn.classList.remove('flash'), 200);}
-function select(idx){currentIdx = (idx + buttons.length) % buttons.length; buttons[currentIdx].focus();}
-
-/* === Tastatur / Fernbedienung === */
-const LEFT  = ['ArrowLeft','Left','VK_LEFT'];
-const RIGHT = ['ArrowRight','Right','VK_RIGHT'];
-window.addEventListener('keydown', e=>{
-  const k = e.key || e.code;
-  if(LEFT.includes(k))       {select(currentIdx-1); e.preventDefault();}
-  else if(RIGHT.includes(k)) {select(currentIdx+1); e.preventDefault();}
-  else if(['Enter','OK','VK_ENTER'].includes(k)){
-    flash(buttons[currentIdx]); buttons[currentIdx].click(); e.preventDefault();
-  }
-  else if(k==='1') triggerPopup(1);
-  else if(k==='2') triggerPopup(2);
-  else if(k==='3') triggerPopup(3);
-});
-
-/* === Canvas‑Größe zuverlässig setzen === */
-function applyCanvasSize(){
-  const w = Math.max(window.innerWidth,  document.documentElement.clientWidth,  screen.width  || 0);
-  const h = Math.max(window.innerHeight, document.documentElement.clientHeight, screen.height || 0);
-  canvas.width  = w;
-  canvas.height = h;
-  genHoles();
+let currentIdx=0;
+function setIdle(){debugEl.textContent=IDLE_TEXT;debugEl.style.opacity=.7;}
+function showDebug(t){debugEl.textContent=t;debugEl.style.opacity=1;clearTimeout(showDebug.t);showDebug.t=setTimeout(setIdle,3000);}
+function flash(b){b.classList.add('flash');setTimeout(()=>b.classList.remove('flash'),200);}
+function select(i){currentIdx=(i+buttons.length)%buttons.length;buttons[currentIdx].focus();}
+function handleKey(e){
+  const k=e.key;
+  if(k==='ArrowLeft')  {select(currentIdx-1); e.preventDefault();}
+  else if(k==='ArrowRight'){select(currentIdx+1); e.preventDefault();}
+  else if(k==='Enter'||k==='OK'){flash(buttons[currentIdx]);buttons[currentIdx].click();e.preventDefault();}
+  else if(k==='1'){triggerPopup(1);}
+  else if(k==='2'){triggerPopup(2);}
+  else if(k==='3'){triggerPopup(3);}
 }
-window.addEventListener('resize', applyCanvasSize);
 
-/* === Rad‑Geometrie === */
-const holes = [];
+/* ---------- Canvas‑Setup ---------- */
+const canvas = $('#cheeseCanvas'), ctx=canvas.getContext('2d');
+function resize(){canvas.width=innerWidth;canvas.height=innerHeight;genHoles();}
+addEventListener('resize',resize);
+
+/* ---------- Rad‑Geometrie ---------- */
+const holes=[];
 function genHoles(){
-  holes.length = 0;
-  const w = canvas.width, h = canvas.height,
-        r = Math.min(w, h) * .3, cx = w/2, cy = h/2;
+  holes.length=0;
+  const w=canvas.width,h=canvas.height,r=Math.min(w,h)*.3, cx=w/2, cy=h/2;
   for(let i=0;i<HOLE_COUNT;i++){
-    const t  = i/HOLE_COUNT * 2*Math.PI,
-          hr = r * (.15 + .05*Math.random()),
-          hx = cx + Math.cos(t)*r*.6*(.8+.2*Math.random()),
-          hy = cy + Math.sin(t)*r*.6*(.8+.2*Math.random());
+    const t=i/HOLE_COUNT*2*Math.PI,
+          hr=r*(.15+.05*Math.random()),
+          hx=cx+Math.cos(t)*r*.6*(.8+.2*Math.random()),
+          hy=cy+Math.sin(t)*r*.6*(.8+.2*Math.random());
     holes.push({hx,hy,hr});
   }
 }
 
-/* === Pop‑ups === */
-const popups = [
-  {id:1,text:['Hi Linda!','Hier Popup 1','😀']},
-  {id:2,text:['Zweites Popup','Alles klar?','👍']},
-  {id:3,text:['Popup 3','Viel Spaß!','🎉']}
+/* ---------- Popup‑Verwaltung ---------- */
+const popups=[
+  {text:['Hi Linda!','Hier ist Popup 1','😀'],     id:1},
+  {text:['Zweites Popup','Alles klar?','👍'],      id:2},
+  {text:['Popup Nummer 3','So sehen Sie','alle drei!'], id:3}
 ];
-let popupActiveId = 0, popupStart = 0;
+let popupActiveId=0, popupStart=0, POPUP_DURATION=8000;
 function triggerPopup(id){
-  popupActiveId = id; popupStart = performance.now();
-  showDebug('Popup '+id); flash($('#btn-p'+id));
+  popupActiveId=id; popupStart=performance.now();
+  menu.blur(); showDebug('Popup '+id); flash($(`#btn-p${id}`));
 }
 
-/* === Zeichen‑Schleife === */
-let startTime, lastTs = null, angle = 0;
+/* ---------- Zeichen‑Schleife ---------- */
+let lastTs=null, angle=0, startTime;
 function draw(ts){
-  if(!startTime) startTime = ts;
-  if(lastTs === null) lastTs = ts;
-  const dt = (ts - lastTs) / 1000; lastTs = ts;
-  angle = (angle + dt * (2*Math.PI / ROTATION_PERIOD)) % (2*Math.PI);
+  if(!startTime) startTime=ts;
+  if(lastTs===null) lastTs=ts;
+  const dt=(ts-lastTs)/1000; lastTs=ts;
+  angle=(angle+dt*(2*Math.PI/ROTATION_PERIOD))%(2*Math.PI);
 
-  /*  Frame mit voller Deckkraft starten  */
-  ctx.globalAlpha = 1;
+  /* Canvas löschen */
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
-  /*  Rad  */
-  const w = canvas.width, h = canvas.height,
-        r = Math.min(w,h) * .3, cx = w/2, cy = h/2;
-  ctx.save();
-  ctx.translate(cx,cy); ctx.rotate(angle); ctx.translate(-cx,-cy);
+  /* Rad */
+  const w=canvas.width,h=canvas.height,r=Math.min(w,h)*.3, cx=w/2, cy=h/2;
+  ctx.save(); ctx.translate(cx,cy); ctx.rotate(angle); ctx.translate(-cx,-cy);
   ctx.beginPath(); ctx.arc(cx,cy,r,0,2*Math.PI);
-  ctx.fillStyle = 'var(--wheel)'; ctx.fill();
-  ctx.lineWidth = r*.05; ctx.strokeStyle = 'var(--rim)'; ctx.stroke();
-  ctx.fillStyle = 'var(--hole)';
-  holes.forEach(({hx,hy,hr})=>{
-    ctx.beginPath(); ctx.arc(hx,hy,hr,0,2*Math.PI); ctx.fill();
-  });
+  ctx.fillStyle=COLORS.wheel; ctx.fill();
+  ctx.lineWidth=r*.05; ctx.strokeStyle=COLORS.rim; ctx.stroke();
+  ctx.fillStyle=COLORS.hole;
+  holes.forEach(({hx,hy,hr})=>{ctx.beginPath();ctx.arc(hx,hy,hr,0,2*Math.PI);ctx.fill();});
   ctx.restore();
 
-  /*  Pop‑up  */
+  /* Pop‑up */
   if(popupActiveId){
-    const elapsed = performance.now() - popupStart;
-    if(elapsed > POPUP_DURATION) popupActiveId = 0;
+    const elapsed=performance.now()-popupStart;
+    if(elapsed>POPUP_DURATION) popupActiveId=0;
     else{
-      const boxW = w*.6, boxH = h*.3, bx = (w-boxW)/2, by = (h-boxH)/2;
+      const boxW=w*0.6, boxH=h*0.3, bx=(w-boxW)/2, by=(h-boxH)/2;
       ctx.save();
-      ctx.globalAlpha = .9;
-      ctx.fillStyle   = 'var(--popup-bg)';
-      ctx.fillRect(bx,by,boxW,boxH);
-      ctx.globalAlpha = 1;
-      ctx.lineWidth   = 5;
-      ctx.strokeStyle = 'var(--popup-line)';
-      ctx.strokeRect(bx,by,boxW,boxH);
-      ctx.fillStyle   = '#fff';
-      ctx.textAlign   = 'center';
-      ctx.textBaseline = 'middle';
-      const lines = popups.find(p=>p.id===popupActiveId).text;
-      const f1 = Math.min(boxH*.22,34), f2 = Math.min(boxH*.18,26);
-      ctx.font = `${f1}px system-ui`; ctx.fillText(lines[0], w/2, by+boxH*.30);
-      ctx.font = `${f2}px system-ui`; ctx.fillText(lines[1], w/2, by+boxH*.53);
-      ctx.font = `${f2}px system-ui`; ctx.fillText(lines[2], w/2, by+boxH*.75);
+      ctx.globalAlpha=.9; ctx.fillStyle=COLORS.popupBg; ctx.fillRect(bx,by,boxW,boxH);
+      ctx.lineWidth=5; ctx.strokeStyle=COLORS.popupLine; ctx.globalAlpha=1; ctx.strokeRect(bx,by,boxW,boxH);
+      ctx.fillStyle='#fff'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      const lines=popups.find(p=>p.id===popupActiveId).text;
+      const f1=Math.min(boxH*0.22,34), f2=Math.min(boxH*0.18,26), f3=Math.min(boxH*0.18,26);
+      ctx.font=`${f1}px system-ui`; ctx.fillText(lines[0],w/2,by+boxH*0.30);
+      ctx.font=`${f2}px system-ui`; ctx.fillText(lines[1],w/2,by+boxH*0.53);
+      ctx.font=`${f3}px system-ui`; ctx.fillText(lines[2],w/2,by+boxH*0.75);
       ctx.restore();
     }
   }
 
-  /*  Timer  */
-  $('#timer').textContent = `Elapsed: ${((performance.now()-startTime)/1000).toFixed(1)} s`;
-
+  $('#timer').textContent=`Elapsed: ${((performance.now()-startTime)/1000).toFixed(1)} s`;
   requestAnimationFrame(draw);
 }
 
-/* === Cast‑Receiver === */
-const STREAM_NS = 'urn:x-cast:com.example.stream';
-const castCtx   = cast.framework.CastReceiverContext.getInstance();
-castCtx.getPlayerManager().setPlaybackConfig({autoResumeNumberOfSegments:1});
-castCtx.start({disableIdleTimeout:true});
-const bus = castCtx.getCastMessageBus(STREAM_NS);
+/* ---------- Cast‑Receiver‑Setup ---------- */
+const STREAM_NS='urn:x-cast:com.example.stream';
+const castCtx=cast.framework.CastReceiverContext.getInstance();
+const mgr=castCtx.getPlayerManager();
+const opts=new cast.framework.CastReceiverOptions();
+opts.disableIdleTimeout=true;
+mgr.setPlaybackConfig({autoResumeNumberOfSegments:1});
+castCtx.start(opts);
+const bus=castCtx.getCastMessageBus(STREAM_NS);
 
-/* === Menü‑Callbacks === */
+/* ---------- Button‑Callbacks ---------- */
 $('#btn-stream').addEventListener('click',()=>{
   flash($('#btn-stream')); showDebug('Aktion: Stream');
   bus.send({type:'start'}); $('#splash').style.display='none';
@@ -233,18 +175,16 @@ $('#btn-p1').addEventListener('click',()=>triggerPopup(1));
 $('#btn-p2').addEventListener('click',()=>triggerPopup(2));
 $('#btn-p3').addEventListener('click',()=>triggerPopup(3));
 
-/* === Startsequenz === */
-window.addEventListener('load',()=>{
-  document.body.focus();      // damit Key‑Events sicher ankommen
-  applyCanvasSize();          // Canvas sofort korrekt
-  triggerPopup(1);            // Demo‑Popup
+/* ---------- Start ---------- */
+addEventListener('keydown',handleKey);
+addEventListener('load',()=>{
+  document.body.focus();
+  resize();          // Canvas‑Größe richtig setzen
+  triggerPopup(1);   // Demo‑Popup gleich anzeigen
   requestAnimationFrame(draw);
   showDebug('Init OK');
-  setTimeout(()=>{
-    bus.send({type:'start'});
-    $('#splash').style.display='none';
-    showDebug('Auto‑Start: Stream');
-  }, AUTO_START_MS);
+  /* Auto‑Start‑Stream nach 20 s, falls niemand etwas tut */
+  setTimeout(()=>{ bus.send({type:'start'}); $('#splash').style.display='none'; showDebug('Auto‑Start: Stream');},AUTO_START_MS);
 });
 </script>
 </body>
