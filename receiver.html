@@ -61,12 +61,12 @@
       const HOLE_COUNT      = 12;
 
       /* ------------------------------------------------------------
-       * UTILITY – ensure body can capture keyboard events
+       * UTIL – ensure body can capture keyboard events
        * ---------------------------------------------------------- */
       window.addEventListener('load', () => document.body.focus());
 
       /* ------------------------------------------------------------
-       * KEYBOARD / D‑PAD HANDLING (simple: Left/Right nav, Enter executes)
+       * KEYBOARD / D‑PAD HANDLING (Left/Right nav, Enter executes)
        * ---------------------------------------------------------- */
       const menu      = document.getElementById('menu');
       const buttons   = Array.from(menu.querySelectorAll('button'));
@@ -95,7 +95,6 @@
           e.preventDefault();
         }
       }
-
       window.addEventListener('keydown', handleKey);
 
       /* ------------------------------------------------------------
@@ -109,7 +108,7 @@
       let angle   = 0;
       const startTime = performance.now();
 
-      // pre‑compute hole positions & radii once (no per‑frame flicker)
+      // pre‑compute hole positions once
       const holes = [];
       function generateHoles(){
         holes.length = 0;
@@ -124,10 +123,9 @@
           holes.push({hx, hy, hr});
         }
       }
-
       function resizeCanvas(){
-        canvas.width  = window.innerWidth;
-        canvas.height = window.innerHeight;
+        canvas.width  = innerWidth;
+        canvas.height = innerHeight;
         generateHoles();
       }
       window.addEventListener('resize', resizeCanvas);
@@ -137,11 +135,7 @@
         if(lastTs === null) lastTs = ts;
         const deltaS = (ts - lastTs) / 1000;
         lastTs = ts;
-
-        // advance angle: (2π / ROTATION_PERIOD) * deltaS
         angle = (angle + deltaS * (2 * Math.PI / ROTATION_PERIOD)) % (2 * Math.PI);
-
-        // update timer text
         const elapsed = (performance.now() - startTime) / 1000;
         timerEl.textContent = `Elapsed: ${elapsed.toFixed(1)} s`;
 
@@ -149,26 +143,26 @@
         const r = Math.min(w, h) * 0.3;
         const cx = w / 2, cy = h / 2;
 
-        ctx.clearRect(0, 0, w, h);
+        ctx.clearRect(0,0,w,h);
         ctx.save();
-        ctx.translate(cx, cy);
+        ctx.translate(cx,cy);
         ctx.rotate(angle);
-        ctx.translate(-cx, -cy);
+        ctx.translate(-cx,-cy);
 
         // wheel body
         ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, 2 * Math.PI);
-        ctx.fillStyle   = '#2277cc';
+        ctx.arc(cx,cy,r,0,2*Math.PI);
+        ctx.fillStyle = '#2277cc';
         ctx.fill();
-        ctx.lineWidth   = r * 0.05;
+        ctx.lineWidth = r*0.05;
         ctx.strokeStyle = '#1155aa';
         ctx.stroke();
 
-        // holes (pre‑computed, so the pattern stays stable)
+        // holes
         ctx.fillStyle = '#114477';
-        holes.forEach(({hx, hy, hr}) => {
+        holes.forEach(({hx,hy,hr})=>{
           ctx.beginPath();
-          ctx.arc(hx, hy, hr, 0, 2 * Math.PI);
+          ctx.arc(hx,hy,hr,0,2*Math.PI);
           ctx.fill();
         });
 
@@ -181,34 +175,53 @@
        * CAF SETUP
        * ---------------------------------------------------------- */
       const STREAM_NS = 'urn:x-cast:com.example.stream';
-
       const castCtx = cast.framework.CastReceiverContext.getInstance();
-      const mgr     = castCtx.getPlayerManager();
+      const mgr = castCtx.getPlayerManager();
 
       const opts = new cast.framework.CastReceiverOptions();
       opts.disableIdleTimeout = true;
-
       const cfg = mgr.getPlaybackConfig();
       cfg.autoResumeNumberOfSegments = 1;
       mgr.setPlaybackConfig(cfg);
 
       mgr.setMessageInterceptor(
         cast.framework.messages.MessageType.LOAD,
-        req => { req.autoplay = true; return req; }
+        req => (req.autoplay = true, req)
       );
-
       castCtx.start(opts);
-
       mgr.addEventListener(
         cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
         () => document.getElementById('splash').style.display = 'none'
       );
 
       /* ------------------------------------------------------------
-       * MESSAGE BUS (still simple)
+       * MESSAGE BUS & MENU CALLBACKS
        * ---------------------------------------------------------- */
-      const bus  = castCtx.getCastMessageBus(STREAM_NS);
+      const bus = castCtx.getCastMessageBus(STREAM_NS);
       const info = document.getElementById('info');
 
+      document.getElementById('menu-stream').addEventListener('click', () => {
+        bus.send({type:'start'});
+        document.getElementById('splash').style.display='none';
+        menu.style.display='none';
+      });
+      document.getElementById('menu-about').addEventListener('click', () => {
+        info.textContent = 'Hi Linda!\nHier ist ein selbstgebauter Player.\nLieben Gruß, Christoph';
+        info.style.display='block';
+        setTimeout(()=>info.style.display='none',5000);
+        menu.style.display='none';
+      });
+
       /* ------------------------------------------------------------
-       * MENU BUTTON CALLBACK
+       * AUTO‑START AFTER 20 s
+       * ---------------------------------------------------------- */
+      const autoStart = setTimeout(()=>{
+        if(menu.style.display!=='flex'){
+          bus.send({type:'start'});
+          document.getElementById('splash').style.display='none';
+        }
+      },AUTO_START_MS);
+      buttons.forEach(btn=>btn.addEventListener('focus',()=>clearTimeout(autoStart)));
+    </script>
+  </body>
+</html>
