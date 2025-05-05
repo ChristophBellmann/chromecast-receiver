@@ -1,225 +1,219 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Low-Latency Receiver v0.1</title>
-    <script src="https://www.gstatic.com/cast/sdk/libs/receiver/2.0.0/cast_receiver.js"></script>
-    <style>
-      html, body {
-        margin:0; padding:0; width:100%; height:100%;
-        background:black; overflow:hidden;
-      }
-      /* Loading overlay */
-      #loading {
-        position:absolute; top:0; left:0; width:100%; height:100%;
-        display:flex; align-items:center; justify-content:center;
-        background:black; color:white; font-size:2rem; z-index:3000;
-      }
-      /* Video element */
-      #video {
-        display:none;
-        width:100%; height:100%; object-fit:cover;
-      }
-      /* Key catcher */
-      #key-catcher {
-        position:absolute; top:0; left:0; width:100%; height:100%;
-        z-index:2000; outline:none;
-      }
-      /* Menu */
-      #menu {
-        position:absolute; top:40%; left:50%;
-        transform:translate(-50%,-50%);
-        display:none; gap:2rem; z-index:1001;
-      }
-      #menu button {
-        font-size:2rem; padding:1rem 2rem;
-        background:rgba(255,255,255,0.1);
-        border:2px solid white; color:white;
-      }
-      #menu button:focus { outline:3px solid #0af; }
-      /* About / Info dialogs */
-      #about, #info {
-        position:absolute; top:50%; left:50%;
-        transform:translate(-50%,-50%);
-        background:rgba(0,0,0,0.8); color:white; padding:2rem;
-        border-radius:8px; display:none; z-index:1002;
-        max-width:80%; text-align:center;
-      }
-      #info { text-align:left; font-family:monospace; }
-      #about button, #info button {
-        margin-top:1rem; font-size:1.2rem; padding:0.5rem 1rem;
-      }
-    </style>
-  </head>
-  <body>
-    <div id="loading">Version 0.1<br/>Loading…</div>
-    <div id="key-catcher" tabindex="0"></div>
+<head>
+  <meta charset="utf-8" />
+  <title>Low-Latency Receiver v0.1</title>
+  <script src="https://www.gstatic.com/cast/sdk/libs/receiver/2.0.0/cast_receiver.js"></script>
+  <style>
+    html, body {
+      margin:0; padding:0;
+      width:100%; height:100%;
+      background:black; overflow:hidden;
+    }
+    /* 1) Video at z-1 */
+    #video {
+      display:none; /* only show on LOAD */
+      position:absolute; top:0; left:0;
+      width:100%; height:100%;
+      object-fit:cover;
+      z-index:1;
+    }
+    /* 2) Loading overlay at z-2 */
+    #loading {
+      position:absolute; top:0; left:0;
+      width:100%; height:100%;
+      display:flex; align-items:center; justify-content:center;
+      background:black; color:white; font-size:2rem;
+      z-index:2;
+    }
+    /* 3) Key catcher at z-3 */
+    #key-catcher {
+      position:absolute; top:0; left:0;
+      width:100%; height:100%;
+      outline:none; z-index:3;
+    }
+    /* 4) Menu at z-4 */
+    #menu {
+      position:absolute; top:40%; left:50%;
+      transform:translate(-50%,-50%);
+      display:none; gap:2rem; z-index:4;
+    }
+    #menu button {
+      font-size:2rem; padding:1rem 2rem;
+      background:rgba(255,255,255,0.1);
+      border:2px solid white; color:white;
+    }
+    #menu button:focus { outline:3px solid #0af; }
+    /* 5) Dialogs at z-5 */
+    #about, #info {
+      position:absolute; top:50%; left:50%;
+      transform:translate(-50%,-50%);
+      background:rgba(0,0,0,0.8); color:white; padding:2rem;
+      border-radius:8px; display:none; z-index:5;
+      max-width:80%; text-align:center;
+    }
+    #info { text-align:left; font-family:monospace; }
+    #about button, #info button {
+      margin-top:1rem; font-size:1.2rem; padding:0.5rem 1rem;
+    }
+  </style>
+</head>
+<body>
+  <div id="loading">Version 0.1<br/>Loading…</div>
+  <div id="key-catcher" tabindex="0"></div>
 
-    <div id="menu">
-      <button id="stream-btn" tabindex="1">Stream</button>
-      <button id="about-btn"  tabindex="2">About</button>
-      <button id="info-btn"   tabindex="3">Info</button>
-    </div>
+  <div id="menu">
+    <button id="stream-btn" tabindex="1">Stream</button>
+    <button id="about-btn"  tabindex="2">About</button>
+    <button id="info-btn"   tabindex="3">Info</button>
+  </div>
 
-    <div id="about">
-      <h2>Low-Latency Receiver</h2>
-      <p>Hi Linda! Hier ist ein selbstgebauter Player.<br/>Lieben Gruß, Christoph</p>
-      <button id="about-close" tabindex="4">Close</button>
-    </div>
+  <div id="about">
+    <h2>Low-Latency Receiver</h2>
+    <p>Hi Linda! Hier ist ein selbstgebauter Player.<br/>Lieben Gruß, Christoph</p>
+    <button id="about-close" tabindex="4">Close</button>
+  </div>
 
-    <div id="info">
-      <h2>Info</h2>
-      <div id="ping">Ping: -- ms</div>
-      <div id="time">Local Time: --:--:--</div>
-      <div id="delay">Stream Delay: -- s</div>
-      <div id="video-info">Video: --×--</div>
-      <div id="audio-info">Audio: AAC 192 kbps, Stereo</div>
-      <button id="info-close" tabindex="5">Close</button>
-    </div>
+  <div id="info">
+    <h2>Info</h2>
+    <div id="ping">Ping: -- ms</div>
+    <div id="time">Local Time: --:--:--</div>
+    <div id="delay">Stream Delay: -- s</div>
+    <div id="video-info">Video: --×--</div>
+    <div id="audio-info">Audio: AAC 192 kbps, Stereo</div>
+    <button id="info-close" tabindex="5">Close</button>
+  </div>
 
-    <video id="video" playsinline></video>
+  <video id="video" playsinline></video>
 
-    <script>
-      // Elements
-      const loading = document.getElementById('loading');
-      const catcher = document.getElementById('key-catcher');
-      const menu    = document.getElementById('menu');
-      const about   = document.getElementById('about');
-      const info    = document.getElementById('info');
-      const buttons = Array.from(menu.querySelectorAll('button'));
-      const videoEl = document.getElementById('video');
-      let idx = 0, streamUrl = null, startTs = null;
+  <script>
+    const loading = document.getElementById('loading');
+    const catcher = document.getElementById('key-catcher');
+    const menu    = document.getElementById('menu');
+    const about   = document.getElementById('about');
+    const info    = document.getElementById('info');
+    const buttons = Array.from(menu.querySelectorAll('button'));
+    const videoEl = document.getElementById('video');
+    let idx = 0, streamUrl = null, startTs = null;
 
-      // Focus catcher on load
-      window.addEventListener('load', ()=> catcher.focus());
+    // keep focus on catcher
+    window.addEventListener('load', () => catcher.focus());
 
-      // Initialize Cast Receiver with custom <video>
-      const context       = cast.framework.CastReceiverContext.getInstance();
-      const options       = new cast.framework.CastReceiverOptions();
-      options.mediaElement     = videoEl;
-      options.disableIdleTimeout = true;
-      const playerManager = context.getPlayerManager();
+    // set up Cast Receiver
+    const context       = cast.framework.CastReceiverContext.getInstance();
+    const options       = new cast.framework.CastReceiverOptions();
+    options.mediaElement       = videoEl;
+    options.disableIdleTimeout = true;
+    const playerManager = context.getPlayerManager();
 
-      // On READY, hide loading and show menu
-      context.addEventListener(
-        cast.framework.system.EventType.READY,
-        () => {
-          loading.style.display = 'none';
-          menu.style.display    = 'flex';
-          catcher.focus();
-        }
-      );
+    // show menu when receiver is ready
+    context.addEventListener(cast.framework.system.EventType.READY, ()=> {
+      menu.style.display = 'flex';
+      catcher.focus();
+    });
 
-      // Show menu helper
-      function showMenu() {
-        menu.style.display = 'flex';
-        idx = 0;
-        buttons[idx].focus();
-      }
+    // helper to show menu
+    function showMenu() {
+      menu.style.display = 'flex';
+      idx = 0; buttons[idx].focus();
+    }
 
-      // Capture Up/Down on both document and catcher
-      function keyHandler(e) {
-        const code = e.keyCode;
-        const isUp = e.key==='ArrowUp' || code===38;
-        const isDn = e.key==='ArrowDown' || code===40;
-        if (isUp||isDn) {
-          showMenu();
-          e.preventDefault();
-        }
-      }
-      document.addEventListener('keydown', keyHandler);
-      catcher.addEventListener('keydown', keyHandler);
-
-      // Menu navigation & selection
-      function navHandler(e) {
-        if (menu.style.display!=='flex') return;
-        const code = e.keyCode;
-        const left  = e.key==='ArrowLeft'  || code===37;
-        const right = e.key==='ArrowRight' || code===39;
-        const up    = e.key==='ArrowUp'    || code===38;
-        const down  = e.key==='ArrowDown'  || code===40;
-        const ok    = e.key==='Enter'      || e.key===' '   || code===13;
-        if (left||up)      idx=(idx+buttons.length-1)%buttons.length;
-        else if (right||down) idx=(idx+1)%buttons.length;
-        else if (ok)       buttons[idx].click();
-        buttons[idx].focus();
+    // capture Up/Down globally
+    function onKey(e) {
+      const kc = e.keyCode;
+      if (e.key==='ArrowUp' || kc===38 || e.key==='ArrowDown' || kc===40) {
+        showMenu();
         e.preventDefault();
       }
-      document.addEventListener('keydown', navHandler);
-      catcher.addEventListener('keydown', navHandler);
+    }
+    document.addEventListener('keydown', onKey);
+    catcher.addEventListener('keydown', onKey);
 
-      // Button handlers
-      document.getElementById('stream-btn').addEventListener('click', ()=>{
-        menu.style.display='none'; catcher.focus();
-      });
-      document.getElementById('about-btn').addEventListener('click', ()=>{
-        about.style.display='block';
-        document.getElementById('about-close').focus();
-      });
-      document.getElementById('about-close').addEventListener('click', ()=>{
-        about.style.display='none'; catcher.focus();
-      });
-      document.getElementById('info-btn').addEventListener('click', ()=>{
-        const now = new Date();
-        document.getElementById('time').textContent = 
-          `Local Time: ${now.toLocaleTimeString()}`;
-        if (streamUrl) {
-          const t0 = Date.now();
-          fetch(streamUrl,{method:'HEAD'})
-            .then(()=>document.getElementById('ping').textContent=`Ping: ${Date.now()-t0} ms`)
-            .catch(()=>document.getElementById('ping').textContent='Ping: error');
-        }
-        if (startTs) {
-          document.getElementById('delay').textContent=
-            `Stream Delay: ${((Date.now()-startTs)/1000).toFixed(2)} s`;
-        }
-        document.getElementById('video-info').textContent=
-          `Video: ${videoEl.videoWidth}×${videoEl.videoHeight}`;
-        info.style.display='block';
-        document.getElementById('info-close').focus();
-      });
-      document.getElementById('info-close').addEventListener('click', ()=>{
-        info.style.display='none'; catcher.focus();
-      });
+    // menu navigation
+    function navMenu(e) {
+      if (menu.style.display!=='flex') return;
+      const kc = e.keyCode;
+      if ([37,38].includes(kc)) idx = (idx+buttons.length-1)%buttons.length;
+      if ([39,40].includes(kc)) idx = (idx+1)%buttons.length;
+      if ([13,32].includes(kc)) buttons[idx].click();
+      buttons[idx].focus();
+      e.preventDefault();
+    }
+    document.addEventListener('keydown', navMenu);
+    catcher.addEventListener('keydown', navMenu);
 
-      // Sync on LOAD, set video.src
-      playerManager.setMessageInterceptor(
-        cast.framework.messages.MessageType.LOAD, req => {
-          menu.style.display=about.style.display=info.style.display='none';
-          streamUrl = req.media.contentId;
-          try {
-            const u = new URL(streamUrl);
-            startTs   = parseInt(u.searchParams.get('ts'),10);
-            if (!isNaN(startTs)) {
-              req.currentTime = (Date.now()-startTs)/1000;
-            }
-          } catch(e){}
-          videoEl.src = streamUrl;
-          // Show loading until playback starts
-          loading.style.display = 'flex';
-          // Hide loading 2s after first 'playing'
-          videoEl.addEventListener('playing', function once() {
-            setTimeout(()=> loading.style.display='none', 2000);
-            videoEl.removeEventListener('playing', once);
-          });
-          // Fallback: hide loading after 15s even if no 'playing'
-          setTimeout(()=> loading.style.display='none', 15000);
-          catcher.focus();
-          return req;
-        }
-      );
+    // buttons
+    document.getElementById('stream-btn').addEventListener('click', ()=>{
+      menu.style.display='none'; catcher.focus();
+    });
+    document.getElementById('about-btn').addEventListener('click', ()=>{
+      about.style.display='block';
+      document.getElementById('about-close').focus();
+    });
+    document.getElementById('about-close').addEventListener('click', ()=>{
+      about.style.display='none'; catcher.focus();
+    });
+    document.getElementById('info-btn').addEventListener('click', ()=>{
+      const now = new Date();
+      document.getElementById('time').textContent = 
+        `Local Time: ${now.toLocaleTimeString()}`;
+      if (streamUrl) {
+        const t0 = Date.now();
+        fetch(streamUrl,{method:'HEAD'})
+          .then(()=>document.getElementById('ping').textContent=`Ping: ${Date.now()-t0} ms`)
+          .catch(()=>document.getElementById('ping').textContent='Ping: error');
+      }
+      if (startTs) {
+        document.getElementById('delay').textContent=
+          `Stream Delay: ${((Date.now()-startTs)/1000).toFixed(2)} s`;
+      }
+      document.getElementById('video-info').textContent=
+        `Video: ${videoEl.videoWidth}×${videoEl.videoHeight}`;
+      info.style.display='block';
+      document.getElementById('info-close').focus();
+    });
+    document.getElementById('info-close').addEventListener('click', ()=>{
+      info.style.display='none'; catcher.focus();
+    });
 
-      // Re-sync on resume & re-focus catcher
-      playerManager.addEventListener(
-        cast.framework.events.EventType.PLAYING, ()=>{
-          if (startTs) videoEl.currentTime = (Date.now()-startTs)/1000;
-          videoEl.play();
-          catcher.focus();
-        }
-      );
+    // on LOAD: show video + loading, sync, then hide overlay on playing
+    playerManager.setMessageInterceptor(
+      cast.framework.messages.MessageType.LOAD, req => {
+        streamUrl = req.media.contentId;
+        try {
+          const u = new URL(streamUrl);
+          startTs = parseInt(u.searchParams.get('ts'),10);
+          if (!isNaN(startTs)) {
+            req.currentTime = (Date.now()-startTs)/1000;
+          }
+        } catch(e){}
+        // show video
+        videoEl.style.display = 'block';
+        videoEl.src = streamUrl;
+        // keep loading visible until playing
+        loading.style.display = 'flex';
+        videoEl.addEventListener('playing', function once() {
+          setTimeout(()=> loading.style.display='none', 2000);
+          videoEl.removeEventListener('playing', once);
+        });
+        // fallback hide after 15s
+        setTimeout(()=> loading.style.display='none', 15000);
+        catcher.focus();
+        return req;
+      }
+    );
 
-      // Start receiver
-      context.start(options);
-    </script>
-  </body>
+    // re-sync on resume
+    playerManager.addEventListener(
+      cast.framework.events.EventType.PLAYING, () => {
+        if (startTs) videoEl.currentTime=(Date.now()-startTs)/1000;
+        videoEl.play();
+        catcher.focus();
+      }
+    );
+
+    // start
+    context.start(options);
+  </script>
+</body>
 </html>
