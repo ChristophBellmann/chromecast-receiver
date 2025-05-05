@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Low-Latency Receiver + Remote-Start + Cheese Wheel</title>
+    <title>Low-Latency Receiver + Cheese Wheel + Auto-Start v0.2</title>
     <!-- CAF Receiver SDK v3 + D-Pad support -->
     <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
     <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework_controls_dpad_tv.js"></script>
@@ -12,27 +12,27 @@
         width:100%; height:100%;
         background:black; overflow:hidden;
       }
-      /* rotating cheese wheel canvas */
+      /* 1) rotating cheese wheel canvas, over splash */
       #cheeseCanvas {
         position:absolute; inset:0;
-        z-index:1;
+        z-index:11;
+        pointer-events:none;
       }
-      /* splash */
+      /* 2) splash */
       #splash {
         position:absolute; inset:0;
         display:flex; flex-direction:column;
         align-items:center; justify-content:center;
-        background:rgba(0,0,0,0.8); z-index:10;
+        background:rgba(0,0,0,0.8);
+        z-index:10;
       }
       #splash img { max-width:80%; }
       #splash #version {
         color:white; margin-top:1em; font-size:1.2em;
       }
-      /* CAF player (hidden under cheese wheel) */
-      cast-media-player {
-        display:none;
-      }
-      /* menu */
+      /* 3) hide CAF player under UI */
+      cast-media-player { display:none; }
+      /* 4) menu */
       #menu {
         position:absolute; top:10%; left:50%;
         transform:translateX(-50%);
@@ -46,7 +46,7 @@
         background:white; color:black; border:none;
         padding:0.5em 1em; font-size:1em;
       }
-      /* info overlay */
+      /* 5) info overlay */
       #info {
         position:absolute; bottom:5%; left:5%;
         background:rgba(0,0,0,0.7); color:white;
@@ -56,33 +56,33 @@
     </style>
   </head>
   <body>
-    <!-- cheese wheel background -->
+    <!-- 1) cheese wheel over everything -->
     <canvas id="cheeseCanvas"></canvas>
 
-    <!-- splash + version -->
+    <!-- 2) splash + version -->
     <div id="splash">
       <img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Loading…">
-      <div id="version">v0.1 + 🧀</div>
+      <div id="version">v0.2 + 🧀</div>
     </div>
 
-    <!-- invisible CAF player placeholder -->
+    <!-- 3) CAF player placeholder -->
     <cast-media-player id="player"></cast-media-player>
 
-    <!-- menu -->
+    <!-- 4) menu -->
     <div id="menu">
       <button id="menu-stream">Stream</button>
       <button id="menu-about">About</button>
     </div>
 
-    <!-- info -->
+    <!-- 5) info -->
     <div id="info"></div>
 
     <script>
       // === rotating cheese wheel ===
       const canvas = document.getElementById('cheeseCanvas');
-      const ctx    = canvas.getContext('2d');
+      const ctx = canvas.getContext('2d');
       function resize() {
-        canvas.width  = window.innerWidth;
+        canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
       }
       window.addEventListener('resize', resize);
@@ -107,10 +107,10 @@
         // holes
         const count = 12;
         for(let i=0;i<count;i++){
-          const t = i/count * 2*Math.PI;
+          const t = i/count*2*Math.PI;
           const hr = r*(0.2+0.1*Math.random());
-          const hx = cx + Math.cos(t)*r*0.6*(0.7+0.3*Math.random());
-          const hy = cy + Math.sin(t)*r*0.6*(0.7+0.3*Math.random());
+          const hx = cx+Math.cos(t)*r*0.6*(0.7+0.3*Math.random());
+          const hy = cy+Math.sin(t)*r*0.6*(0.7+0.3*Math.random());
           ctx.beginPath();
           ctx.arc(hx,hy,hr,0,2*Math.PI);
           ctx.fillStyle = '#114477';
@@ -122,7 +122,7 @@
       }
       drawCheese();
 
-      // === existing CAF & menu logic ===
+      // === CAF + menu + auto-start after 20s ===
       const STREAM_NS = 'urn:x-cast:com.example.stream';
       const context = cast.framework.CastReceiverContext.getInstance();
       const playerManager = context.getPlayerManager();
@@ -136,15 +136,18 @@
         req => { req.autoplay = true; return req; }
       );
       context.start(options);
+      // hide splash on real media load
       playerManager.addEventListener(
         cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
         () => document.getElementById('splash').style.display = 'none'
       );
+
       const bus = context.getCastMessageBus(STREAM_NS);
       const menu = document.getElementById('menu');
       const infoEl = document.getElementById('info');
       const items = Array.from(menu.querySelectorAll('button'));
       let idx = 0;
+
       document.addEventListener('keydown', e => {
         if (e.key==='ArrowUp'||e.key==='ArrowDown') {
           menu.style.display = 'flex';
@@ -163,19 +166,27 @@
           e.preventDefault();
         }
       });
-      document.getElementById('menu-stream')
-        .addEventListener('click',() => {
-          bus.send({type:'start'}); menu.style.display='none';
-        });
-      document.getElementById('menu-about')
-        .addEventListener('click',() => {
-          const now=new Date().toLocaleTimeString();
-          infoEl.textContent =
-            `Hi Linda!\nHier ist ein selbstgebauter Player.\nLieben Gruß, Christoph\n\nLocal Time: ${now}`;
-          infoEl.style.display='block';
-          setTimeout(()=>infoEl.style.display='none',5000);
-          menu.style.display='none';
-        });
+
+      document.getElementById('menu-stream').addEventListener('click',() => {
+        bus.send({type:'start'});
+        document.getElementById('splash').style.display='none';
+        menu.style.display='none';
+      });
+
+      document.getElementById('menu-about').addEventListener('click',() => {
+        const now = new Date().toLocaleTimeString();
+        infoEl.textContent =
+          `Hi Linda!\nHier ist ein selbstgebauter Player.\nLieben Gruß, Christoph\n\nLocal Time: ${now}`;
+        infoEl.style.display='block';
+        setTimeout(()=>infoEl.style.display='none',5000);
+        menu.style.display='none';
+      });
+
+      // auto-start after 20 seconds
+      setTimeout(() => {
+        bus.send({type:'start'});
+        document.getElementById('splash').style.display='none';
+      }, 20_000);
     </script>
   </body>
 </html>
