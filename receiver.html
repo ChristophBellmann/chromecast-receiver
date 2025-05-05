@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Low-Latency Receiver + Cheese Wheel v0.21</title>
+    <title>Low-Latency Receiver + Cheese Wheel + Auto-Start v0.2</title>
     <!-- CAF Receiver SDK v3 + D-Pad support -->
     <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
     <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework_controls_dpad_tv.js"></script>
@@ -12,7 +12,7 @@
         width:100%; height:100%;
         background:black; overflow:hidden;
       }
-      /* 1) rotating cheese wheel canvas */
+      /* 1) cheese wheel canvas over splash */
       #cheeseCanvas {
         position:absolute; inset:0;
         z-index:11;
@@ -30,7 +30,7 @@
       #splash #version {
         color:white; margin-top:1em; font-size:1.2em;
       }
-      /* 3) hide the CAF player widget */
+      /* 3) hide the CAF player UI */
       cast-media-player { display:none; }
       /* 4) menu */
       #menu {
@@ -65,10 +65,10 @@
     <!-- 2) splash + version -->
     <div id="splash">
       <img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Loading…">
-      <div id="version">v0.21 + 🧀</div>
+      <div id="version">v0.2 + 🧀</div>
     </div>
 
-    <!-- 3) CAF player -->
+    <!-- 3) CAF player placeholder -->
     <cast-media-player id="player"></cast-media-player>
 
     <!-- 4) menu -->
@@ -81,25 +81,15 @@
     <div id="info"></div>
 
     <script>
-      // === debug helper ===
-      const STREAM_NS = 'urn:x-cast:com.example.stream';
-      const context    = cast.framework.CastReceiverContext.getInstance();
-      const bus        = context.getCastMessageBus(STREAM_NS);
-      function debug(msg) {
-        console.log('DEBUG:', msg);
-        bus.send({ type:'debug', msg });
-      }
-
-      // === rotating cheese wheel ===
+      // rotating cheese wheel
       const canvas = document.getElementById('cheeseCanvas');
-      const ctx    = canvas.getContext('2d');
+      const ctx = canvas.getContext('2d');
       function resize() {
-        canvas.width  = window.innerWidth;
+        canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
       }
       window.addEventListener('resize', resize);
       resize();
-
       let angle = 0;
       function drawCheese() {
         const w = canvas.width, h = canvas.height;
@@ -112,33 +102,34 @@
         // wheel
         ctx.beginPath();
         ctx.arc(cx,cy,r,0,2*Math.PI);
-        ctx.fillStyle   = '#2277cc';
+        ctx.fillStyle = '#2277cc';
         ctx.fill();
-        ctx.lineWidth   = r*0.05;
+        ctx.lineWidth = r*0.05;
         ctx.strokeStyle = '#1155aa';
         ctx.stroke();
         // holes
         const count = 12;
-        for (let i=0; i<count; i++){
-          const t  = (i/count)*2*Math.PI;
+        for(let i=0;i<count;i++){
+          const t = (i/count)*2*Math.PI;
           const hr = r*(0.2+0.1*Math.random());
-          const hx = cx + Math.cos(t)*r*0.6*(0.7+0.3*Math.random());
-          const hy = cy + Math.sin(t)*r*0.6*(0.7+0.3*Math.random());
+          const hx = cx+Math.cos(t)*r*0.6*(0.7+0.3*Math.random());
+          const hy = cy+Math.sin(t)*r*0.6*(0.7+0.3*Math.random());
           ctx.beginPath();
           ctx.arc(hx,hy,hr,0,2*Math.PI);
           ctx.fillStyle = '#114477';
           ctx.fill();
         }
         ctx.restore();
-        angle += 0.00002;  // slower rotation
+        angle += 0.0002;
         requestAnimationFrame(drawCheese);
       }
       drawCheese();
-      debug('Cheese wheel animation started');
 
-      // === CAF initialization ===
+      // CAF + menu + auto-start
+      const STREAM_NS = 'urn:x-cast:com.example.stream';
+      const context = cast.framework.CastReceiverContext.getInstance();
       const playerManager = context.getPlayerManager();
-      const options       = new cast.framework.CastReceiverOptions();
+      const options = new cast.framework.CastReceiverOptions();
       options.disableIdleTimeout = true;
       const cfg = playerManager.getPlaybackConfig();
       cfg.autoResumeNumberOfSegments = 1;
@@ -148,71 +139,57 @@
         req => { req.autoplay = true; return req; }
       );
       context.start(options);
-      debug('CAF receiver started v0.21');
 
-      // hide splash on real media load
       playerManager.addEventListener(
         cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
-        () => {
-          document.getElementById('splash').style.display = 'none';
-          debug('Media load complete: splash hidden');
-        }
+        () => document.getElementById('splash').style.display = 'none'
       );
 
-      // === menu logic ===
-      const menu   = document.getElementById('menu');
+      const bus = context.getCastMessageBus(STREAM_NS);
+      const menu = document.getElementById('menu');
       const infoEl = document.getElementById('info');
-      const items  = Array.from(menu.querySelectorAll('button'));
+      const items = Array.from(menu.querySelectorAll('button'));
       let idx = 0;
 
       document.addEventListener('keydown', e => {
-        debug(`keydown ${e.key}`);
-        if (e.key==='ArrowUp' || e.key==='ArrowDown') {
+        if (e.key==='ArrowUp'||e.key==='ArrowDown') {
           menu.style.display = 'flex';
           idx = 0; items[idx].focus();
-          debug('Menu shown');
           e.preventDefault();
         } else if (menu.style.display==='flex') {
-          if (e.key==='ArrowUp') {
-            idx = (idx + items.length - 1) % items.length;
-          } else if (e.key==='ArrowDown') {
-            idx = (idx + 1) % items.length;
-          } else if (e.key==='Enter') {
+          if (e.key==='ArrowUp')
+            idx = (idx+items.length-1)%items.length;
+          else if (e.key==='ArrowDown')
+            idx = (idx+1)%items.length;
+          else if (e.key==='Enter')
             items[idx].click();
-          } else if (e.key==='Escape') {
-            menu.style.display = 'none';
-            debug('Menu hidden');
-          }
+          else if (e.key==='Escape')
+            menu.style.display='none';
           items[idx].focus();
-          debug(`Focus idx=${idx}`);
           e.preventDefault();
         }
       });
 
-      document.getElementById('menu-stream').addEventListener('click', () => {
-        debug('Stream clicked');
-        bus.send({ type:'start' });
-        document.getElementById('splash').style.display='none';
-        menu.style.display='none';
-      });
+      document.getElementById('menu-stream')
+        .addEventListener('click',() => {
+          bus.send({type:'start'});
+          document.getElementById('splash').style.display='none';
+          menu.style.display='none';
+        });
 
-      document.getElementById('menu-about').addEventListener('click', () => {
-        debug('About clicked');
-        const now = new Date().toLocaleTimeString();
-        infoEl.textContent =
-          `Hi Linda!\nHier ist ein selbstgebauter Player.\nLieben Gruß, Christoph\n\nLocal Time: ${now}`;
-        infoEl.style.display='block';
-        setTimeout(()=> {
-          infoEl.style.display='none';
-          debug('Info hidden');
-        },5000);
-        menu.style.display='none';
-      });
+      document.getElementById('menu-about')
+        .addEventListener('click',() => {
+          const now = new Date().toLocaleTimeString();
+          infoEl.textContent =
+            `Hi Linda!\nHier ist ein selbstgebauter Player.\nLieben Gruß, Christoph\n\nLocal Time: ${now}`;
+          infoEl.style.display='block';
+          setTimeout(()=>infoEl.style.display='none',5000);
+          menu.style.display='none';
+        });
 
-      // === auto-start after 20 seconds ===
+      // auto-start after 20 seconds
       setTimeout(() => {
-        debug('20s elapsed — auto-starting stream');
-        bus.send({ type:'start' });
+        bus.send({type:'start'});
         document.getElementById('splash').style.display='none';
       }, 20000);
     </script>
