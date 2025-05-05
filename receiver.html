@@ -12,7 +12,7 @@
         width:100%; height:100%;
         background:black; overflow:hidden;
       }
-      /* 1) rotating cheese wheel canvas, over splash */
+      /* 1) cheese wheel canvas, over splash */
       #cheeseCanvas {
         position:absolute; inset:0;
         z-index:11;
@@ -30,13 +30,20 @@
       #splash #version {
         color:white; margin-top:1em; font-size:1.2em;
       }
-      /* elapsed timer, just below version */
+      /* 3) timer under the wheel */
       #timer {
-        color:#88f; margin-top:0.5em; font-size:1em;
+        position:absolute;
+        top:60%; /* slightly below center */
+        left:50%;
+        transform:translateX(-50%);
+        color:#88f;
+        font-size:1.2em;
+        z-index:12;
+        pointer-events:none;
       }
-      /* 3) hide CAF player under UI */
+      /* 4) hide CAF player UI */
       cast-media-player { display:none; }
-      /* 4) menu (horizontal as before) */
+      /* 5) menu (horizontal) */
       #menu {
         position:absolute; top:10%; left:50%;
         transform:translateX(-50%);
@@ -44,13 +51,13 @@
         background:rgba(0,0,0,0.7);
         padding:1em; border-radius:8px;
         gap:1em; z-index:20;
-        display:flex; /* horizontal layout */
+        display:flex;
       }
       #menu button {
         background:white; color:black; border:none;
         padding:0.5em 1em; font-size:1em;
       }
-      /* 5) info overlay */
+      /* 6) info overlay */
       #info {
         position:absolute; bottom:5%; left:5%;
         background:rgba(0,0,0,0.7); color:white;
@@ -60,30 +67,32 @@
     </style>
   </head>
   <body>
-    <!-- 1) cheese wheel over everything -->
+    <!-- 1) cheese wheel -->
     <canvas id="cheeseCanvas"></canvas>
 
-    <!-- 2) splash + version + timer -->
+    <!-- 2) splash + version -->
     <div id="splash">
       <img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Loading…">
       <div id="version">v0.2 + 🧀</div>
-      <div id="timer">Elapsed: 0.0 s</div>
     </div>
 
-    <!-- 3) CAF player placeholder -->
+    <!-- 3) timer below wheel -->
+    <div id="timer">Elapsed: 0.0 s</div>
+
+    <!-- 4) CAF player -->
     <cast-media-player id="player"></cast-media-player>
 
-    <!-- 4) menu -->
+    <!-- 5) menu -->
     <div id="menu">
       <button id="menu-stream">Stream</button>
       <button id="menu-about">About</button>
     </div>
 
-    <!-- 5) info -->
+    <!-- 6) info -->
     <div id="info"></div>
 
     <script>
-      // === rotating cheese wheel & timer (1 rotation per second) ===
+      // === rotating cheese wheel & timer (1 rotation per 5 seconds) ===
       const canvas = document.getElementById('cheeseCanvas');
       const ctx    = canvas.getContext('2d');
       function resizeCanvas() {
@@ -98,16 +107,18 @@
 
       function drawCheese(ts) {
         if (startTs === null) startTs = ts;
-        if (lastTs === null) lastTs  = ts;
-        const elapsedMs = ts - startTs;
-        const elapsedS  = elapsedMs / 1000;
-        timerEl.textContent = 'Elapsed: ' + elapsedS.toFixed(1) + ' s';
+        if (lastTs === null)  lastTs  = ts;
+        // update elapsed timer
+        const elapsedS = ((ts - startTs) / 1000).toFixed(1);
+        timerEl.textContent = 'Elapsed: ' + elapsedS + ' s';
 
+        // time delta
         const deltaS = (ts - lastTs) / 1000;
         lastTs = ts;
-        // rotate one full turn per second → 2π rad/s
-        angle = (angle + deltaS * 2 * Math.PI) % (2 * Math.PI);
+        // **one full rotation per 5 seconds** → (2π rad) / 5s
+        angle = (angle + deltaS * (2 * Math.PI / 5)) % (2 * Math.PI);
 
+        // draw
         const w = canvas.width, h = canvas.height;
         const r = Math.min(w,h)*0.3, cx = w/2, cy = h/2;
         ctx.clearRect(0,0,w,h);
@@ -115,8 +126,6 @@
         ctx.translate(cx,cy);
         ctx.rotate(angle);
         ctx.translate(-cx,-cy);
-
-        // wheel
         ctx.beginPath();
         ctx.arc(cx,cy,r,0,2*Math.PI);
         ctx.fillStyle   = '#2277cc';
@@ -124,11 +133,9 @@
         ctx.lineWidth   = r*0.05;
         ctx.strokeStyle = '#1155aa';
         ctx.stroke();
-
         // holes
-        const count = 12;
-        for (let i=0; i<count; i++){
-          const t  = (i/count)*2*Math.PI;
+        for (let i=0; i<12; i++){
+          const t  = (i/12)*2*Math.PI;
           const hr = r*(0.2+0.1*Math.random());
           const hx = cx + Math.cos(t)*r*0.6*(0.7+0.3*Math.random());
           const hy = cy + Math.sin(t)*r*0.6*(0.7+0.3*Math.random());
@@ -143,22 +150,22 @@
       }
       requestAnimationFrame(drawCheese);
 
-      // === CAF + menu + auto-start after 20 s ===
-      const STREAM_NS    = 'urn:x-cast:com.example.stream';
-      const context      = cast.framework.CastReceiverContext.getInstance();
-      const playerMgr    = context.getPlayerManager();
-      const options      = new cast.framework.CastReceiverOptions();
+      // === CAF + menu + auto-start after 20s ===
+      const STREAM_NS = 'urn:x-cast:com.example.stream';
+      const context   = cast.framework.CastReceiverContext.getInstance();
+      const mgr       = context.getPlayerManager();
+      const options   = new cast.framework.CastReceiverOptions();
       options.disableIdleTimeout = true;
-      const cfg          = playerMgr.getPlaybackConfig();
+      const cfg = mgr.getPlaybackConfig();
       cfg.autoResumeNumberOfSegments = 1;
-      playerMgr.setPlaybackConfig(cfg);
-      playerMgr.setMessageInterceptor(
+      mgr.setPlaybackConfig(cfg);
+      mgr.setMessageInterceptor(
         cast.framework.messages.MessageType.LOAD,
         req => { req.autoplay = true; return req; }
       );
       context.start(options);
 
-      playerMgr.addEventListener(
+      mgr.addEventListener(
         cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
         () => document.getElementById('splash').style.display = 'none'
       );
