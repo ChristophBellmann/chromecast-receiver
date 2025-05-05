@@ -47,11 +47,10 @@
       #menu {
         position:absolute; top:10%; left:50%;
         transform:translateX(-50%);
-        display:none;
         background:rgba(0,0,0,0.7);
         padding:1em; border-radius:8px;
         gap:1em; z-index:20;
-        display:flex;
+        display:none;
       }
       #menu button {
         background:white; color:black; border:none;
@@ -100,7 +99,7 @@
         document.body.focus();
       });
 
-      // === rotating cheese wheel & timer (1 rotation per 5 seconds) ===
+      // === rotating cheese wheel & timer (1 rotation per 5s) ===
       const canvas = document.getElementById('cheeseCanvas');
       const ctx    = canvas.getContext('2d');
       const timerEl = document.getElementById('timer');
@@ -115,8 +114,7 @@
 
       function drawCheese(ts) {
         if (startTs === null) startTs = ts;
-        const elapsedMs = ts - startTs;
-        const elapsedS  = elapsedMs / 1000;
+        const elapsedS = (ts - startTs) / 1000;
         timerEl.textContent = 'Elapsed: ' + elapsedS.toFixed(1) + ' s';
 
         // compute angle: full circle every 5s
@@ -213,6 +211,7 @@
         menu.style.display = 'none';
       });
 
+      // auto-start after 20 seconds
       setTimeout(() => {
         bus.send({ type:'start' });
         document.getElementById('splash').style.display = 'none';
