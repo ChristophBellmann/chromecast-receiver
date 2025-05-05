@@ -26,8 +26,11 @@
   <div id="timer">Elapsed: 0.0 s</div>
   <div id="debug">Bereit – keine Aktion</div>
   <cast-media-player id="player"></cast-media-player>
-  <div id="menu"><button id="menu-stream">Stream</button><button id="menu-about">About</button></div>
-
+  <div id="menu">
+    <button id="menu-stream">Stream</button>
+    <button id="menu-about">About</button>
+    <button id="menu-popup2">Popup 2</button>
+  </div>
 <script>
 const ROTATION_PERIOD=15,AUTO_START_MS=20000,HOLE_COUNT=12,IDLE_TEXT='Bereit – keine Aktion';
 window.addEventListener('load',()=>{document.body.focus();setIdle();});
@@ -46,17 +49,15 @@ const holes=[];
 function genHoles(){holes.length=0;const w=canvas.width,h=canvas.height,r=Math.min(w,h)*.3,cx=w/2,cy=h/2;for(let i=0;i<HOLE_COUNT;i++){const t=i/HOLE_COUNT*2*Math.PI,hr=r*(.15+.05*Math.random()),hx=cx+Math.cos(t)*r*.6*(.8+.2*Math.random()),hy=cy+Math.sin(t)*r*.6*(.8+.2*Math.random());holes.push({hx,hy,hr});}}
 function resize(){canvas.width=innerWidth;canvas.height=innerHeight;genHoles();}
 window.addEventListener('resize',resize);resize();
-// simple popup state
-let popupActive=false,popupStart=0,popupDuration=3000;
-function triggerPopup(){popupActive=true;popupStart=performance.now();showDebug('Popup gezeichnet');}
+// popup state
+let popupActive=false,popupStart=0,popupDuration=3000,popupType=1;
+function triggerPopup(type=1){popupActive=true;popupStart=performance.now();popupType=type;menu.style.display='none';showDebug(`Popup ${type} gezeichnet`);}
 function draw(ts){if(lastTs===null)lastTs=ts;const d=(ts-lastTs)/1000;lastTs=ts;angle=(angle+d*(2*Math.PI/ROTATION_PERIOD))%(2*Math.PI);timerEl.textContent=`Elapsed: ${((performance.now()-startTime)/1000).toFixed(1)} s`;
   const w=canvas.width,h=canvas.height,r=Math.min(w,h)*.3,cx=w/2,cy=h/2;
   ctx.clearRect(0,0,w,h);
-  // wheel
   ctx.save();ctx.translate(cx,cy);ctx.rotate(angle);ctx.translate(-cx,-cy);
   ctx.beginPath();ctx.arc(cx,cy,r,0,2*Math.PI);ctx.fillStyle='#2277cc';ctx.fill();ctx.lineWidth=r*.05;ctx.strokeStyle='#1155aa';ctx.stroke();
   ctx.fillStyle='#114477';holes.forEach(({hx,hy,hr})=>{ctx.beginPath();ctx.arc(hx,hy,hr,0,2*Math.PI);ctx.fill();});ctx.restore();
-  // popup draw
   if(popupActive){const elapsed=performance.now()-popupStart;if(elapsed>popupDuration){popupActive=false;}else{
       ctx.save();
       const boxW=w*0.6,boxH=h*0.3;const bx=(w-boxW)/2,by=(h-boxH)/2;
@@ -64,10 +65,17 @@ function draw(ts){if(lastTs===null)lastTs=ts;const d=(ts-lastTs)/1000;lastTs=ts;
       ctx.fillStyle='#000';ctx.fillRect(bx,by,boxW,boxH);
       ctx.lineWidth=4;ctx.strokeStyle='#0af';ctx.strokeRect(bx,by,boxW,boxH);
       ctx.globalAlpha=1;
-      ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';ctx.font=`${Math.min(boxH*0.18,32)}px system-ui`;
-      ctx.fillText('Hi Linda! Hier ist ein\nselbstgebauter Player.',w/2,by+boxH*0.4);
-      ctx.font=`${Math.min(boxH*0.14,24)}px system-ui`;
-      ctx.fillText('Lieben Gruß, Christoph',w/2,by+boxH*0.7);
+      ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';
+      if(popupType===1){
+        ctx.font=`${Math.min(boxH*0.18,32)}px system-ui`;
+        ctx.fillText('Hi Linda! Hier ist ein',w/2,by+boxH*0.35);
+        ctx.fillText('selbstgebauter Player.',w/2,by+boxH*0.52);
+        ctx.font=`${Math.min(boxH*0.14,24)}px system-ui`;
+        ctx.fillText('Lieben Gruß, Christoph',w/2,by+boxH*0.75);
+      } else if(popupType===2){
+        ctx.font=`${Math.min(boxH*0.2,34)}px system-ui`;
+        ctx.fillText('🎉 Zweites Popup 🎉',w/2,by+boxH*0.5);
+      }
       ctx.restore();}}
   requestAnimationFrame(draw);
 }
@@ -82,7 +90,9 @@ const bus=castCtx.getCastMessageBus(STREAM_NS);
 document.getElementById('menu-stream').addEventListener('click',()=>{
   flash(buttons[0]);showDebug('Aktion: Stream');bus.send({type:'start'});document.getElementById('splash').style.display='none';menu.style.display='none';});
 document.getElementById('menu-about').addEventListener('click',()=>{
-  flash(buttons[1]);triggerPopup();menu.style.display='none';});
+  flash(buttons[1]);triggerPopup(1);});
+document.getElementById('menu-popup2').addEventListener('click',()=>{
+  flash(buttons[2]);triggerPopup(2);});
 const autoStart=setTimeout(()=>{if(menu.style.display!=='flex'){bus.send({type:'start'});document.getElementById('splash').style.display='none';showDebug('Auto‑Start: Stream');}},AUTO_START_MS);buttons.forEach(b=>b.addEventListener('focus',()=>clearTimeout(autoStart)));
 </script>
 </body>
