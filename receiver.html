@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Low-Latency Receiver</title>
+    <!-- Cast Receiver SDK v2 -->
+    <script src="https://www.gstatic.com/cast/sdk/libs/receiver/2.0.0/cast_receiver.js"></script>
+    <style>
+      /* Full-screen black background */
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: black;
+      }
+      /* Make the player fill the screen */
+      cast-media-player {
+        width: 100%;
+        height: 100%;
+        position: absolute;
+        top: 0;
+        left: 0;
+      }
+      /* Hide all on-screen controls & progress bars */
+      .media-controls,
+      .progress-bar,
+      .seek-bar,
+      .control-bar {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <cast-media-player id="player"></cast-media-player>
+    <script>
+      // Initialize the Cast Receiver
+      const context = cast.framework.CastReceiverContext.getInstance();
+      const playerManager = context.getPlayerManager();
+
+      // Force autoplay when LOAD arrives
+      playerManager.setMessageInterceptor(
+        cast.framework.messages.MessageType.LOAD,
+        (loadRequestData) => {
+          loadRequestData.autoplay = true;
+          return loadRequestData;
+        }
+      );
+
+      // Disable the idle timeout so the receiver stays active
+      const options = new cast.framework.CastReceiverOptions();
+      options.disableIdleTimeout = true;
+
+      context.start(options);
+    </script>
+  </body>
+</html>
