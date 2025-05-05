@@ -2,42 +2,47 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Low-Latency Receiver</title>
+    <title>Low-Latency Receiver v0.1</title>
     <script src="https://www.gstatic.com/cast/sdk/libs/receiver/2.0.0/cast_receiver.js"></script>
     <style>
       html, body {
         margin:0; padding:0; width:100%; height:100%;
         background:black; overflow:hidden;
       }
-      /* our video tag */
+      /* Loading screen */
+      #loading {
+        position:absolute; top:0; left:0; width:100%; height:100%;
+        display:flex; align-items:center; justify-content:center;
+        background:black; color:white; font-size:2rem; z-index:3000;
+      }
+      /* Our video element */
       #video {
         width:100%; height:100%; object-fit:cover;
         background:black;
       }
-      /* full-screen key catcher */
+      /* Full-screen key catcher */
       #key-catcher {
         position:absolute; top:0; left:0; width:100%; height:100%;
         z-index:2000; outline:none;
       }
-      /* menu overlay */
+      /* Menu overlay */
       #menu {
         position:absolute; top:40%; left:50%;
-        transform:translate(-50%,-50%); display:flex; gap:2rem;
+        transform:translate(-50%,-50%); display:none; gap:2rem;
         z-index:1001;
       }
       #menu button {
         font-size:2rem; padding:1rem 2rem;
-        background:rgba(255,255,255,0.1);
-        border:2px solid white; color:white;
+        background:rgba(255,255,255,0.1); border:2px solid white; color:white;
       }
       #menu button:focus { outline:3px solid #0af; }
-      /* dialogs */
+      /* About & Info dialogs */
       #about, #info {
         position:absolute; top:50%; left:50%;
         transform:translate(-50%,-50%);
-        background:rgba(0,0,0,0.8); color:white;
-        padding:2rem; border-radius:8px;
-        display:none; z-index:1002; max-width:80%; text-align:center;
+        background:rgba(0,0,0,0.8); color:white; padding:2rem;
+        border-radius:8px; display:none; z-index:1002;
+        max-width:80%; text-align:center;
       }
       #info { text-align:left; font-family:monospace; }
       #about button, #info button {
@@ -46,7 +51,10 @@
     </style>
   </head>
   <body>
-    <!-- Invisible focus‐catcher -->
+    <!-- Loading screen -->
+    <div id="loading">Version 0.1<br/>Loading…</div>
+
+    <!-- Invisible focus-catcher -->
     <div id="key-catcher" tabindex="0"></div>
 
     <!-- Menu -->
@@ -74,30 +82,39 @@
       <button id="info-close" tabindex="5">Close</button>
     </div>
 
-    <!-- Our video element -->
+    <!-- Video element -->
     <video id="video" playsinline></video>
 
     <script>
-      // focus catcher on load
+      // Grab focus on load
       const catcher = document.getElementById('key-catcher');
-      window.addEventListener('load', ()=>{ catcher.focus() });
+      window.addEventListener('load', () => catcher.focus());
 
-      // Cast setup
+      const menu       = document.getElementById('menu');
+      const aboutBox   = document.getElementById('about');
+      const infoBox    = document.getElementById('info');
+      const buttons    = Array.from(menu.querySelectorAll('button'));
+      let idx = 0;
+
+      let streamUrl = null, startTs = null;
       const videoEl       = document.getElementById('video');
       const context       = cast.framework.CastReceiverContext.getInstance();
       const options       = new cast.framework.CastReceiverOptions();
-      options.mediaElement     = videoEl;       // use our <video>
+      options.mediaElement     = videoEl;
       options.disableIdleTimeout = true;
       const playerManager = context.getPlayerManager();
 
-      let streamUrl = null, startTs = null;
-      const menu     = document.getElementById('menu');
-      const aboutBox = document.getElementById('about');
-      const infoBox  = document.getElementById('info');
-      const buttons  = Array.from(menu.querySelectorAll('button'));
-      let idx = 0;
+      // On READY: hide loading, show menu
+      context.addEventListener(
+        cast.framework.system.EventType.READY,
+        () => {
+          document.getElementById('loading').style.display = 'none';
+          menu.style.display = 'flex';
+          catcher.focus();
+        }
+      );
 
-      // show menu on ▲/▼ (modern + legacy keycodes)
+      // Show menu on up/down
       catcher.addEventListener('keydown', e => {
         const up   = e.key==='ArrowUp'   || e.keyCode===38;
         const down = e.key==='ArrowDown' || e.keyCode===40;
@@ -108,7 +125,7 @@
         }
       });
 
-      // navigate & select
+      // Navigate/select menu
       catcher.addEventListener('keydown', e => {
         if (menu.style.display==='flex') {
           const left  = e.key==='ArrowLeft'  || e.keyCode===37;
@@ -124,30 +141,31 @@
         }
       });
 
-      // button handlers
+      // Button handlers
       document.getElementById('stream-btn').addEventListener('click', ()=>{
         menu.style.display='none'; catcher.focus();
       });
       document.getElementById('about-btn').addEventListener('click', ()=>{
-        aboutBox.style.display='block'; 
+        aboutBox.style.display='block';
         document.getElementById('about-close').focus();
       });
       document.getElementById('about-close').addEventListener('click', ()=>{
         aboutBox.style.display='none'; catcher.focus();
       });
       document.getElementById('info-btn').addEventListener('click', ()=>{
-        // populate Info
         const now = new Date();
         document.getElementById('time').textContent  = 
           `Local Time: ${now.toLocaleTimeString()}`;
         if (streamUrl) {
           const t0=Date.now();
-          fetch(streamUrl,{method:'HEAD'})
-            .then(()=>document.getElementById('ping').textContent=`Ping: ${Date.now()-t0} ms`)
-            .catch(_=>document.getElementById('ping').textContent='Ping: error');
+          fetch(streamUrl,{method:'HEAD'}).then(()=>{
+            document.getElementById('ping').textContent = `Ping: ${Date.now()-t0} ms`;
+          }).catch(()=>{
+            document.getElementById('ping').textContent = 'Ping: error';
+          });
         }
         if (startTs) {
-          document.getElementById('delay').textContent= 
+          document.getElementById('delay').textContent=
             `Stream Delay: ${((Date.now()-startTs)/1000).toFixed(2)} s`;
         }
         document.getElementById('video-info').textContent=
@@ -161,25 +179,25 @@
 
       // Sync on LOAD
       playerManager.setMessageInterceptor(
-        cast.framework.messages.MessageType.LOAD, req=> {
+        cast.framework.messages.MessageType.LOAD, loadRequestData => {
           menu.style.display=aboutBox.style.display=infoBox.style.display='none';
-          streamUrl = req.media.contentId;
+          streamUrl = loadRequestData.media.contentId;
           try {
-            const url = new URL(streamUrl);
-            startTs   = parseInt(url.searchParams.get('ts'),10);
+            const url    = new URL(streamUrl);
+            startTs      = parseInt(url.searchParams.get('ts'),10);
             if (!isNaN(startTs)) {
-              req.currentTime = (Date.now()-startTs)/1000;
+              loadRequestData.currentTime = (Date.now()-startTs)/1000;
             }
-          } catch(e){}
-          // set video src and manual play
+          } catch(e){ }
+          // set video src
           videoEl.src = streamUrl;
-          return req;
+          return loadRequestData;
         }
       );
 
-      // on PLAYING (resume) re-sync and play
+      // Re-sync on resume
       playerManager.addEventListener(
-        cast.framework.events.EventType.PLAYING, ()=> {
+        cast.framework.events.EventType.PLAYING, () => {
           if (startTs) {
             videoEl.currentTime = (Date.now()-startTs)/1000;
           }
@@ -187,7 +205,7 @@
         }
       );
 
-      // start
+      // Start receiver
       context.start(options);
     </script>
   </body>
