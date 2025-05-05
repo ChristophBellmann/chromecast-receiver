@@ -2,178 +2,49 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Low‑Latency Receiver + Cheese Wheel + Auto‑Start v1.3</title>
-  <!-- CAF Receiver SDK v3 + D‑Pad support -->
+  <title>Low‑Latency Receiver + Cheese Wheel + Auto‑Start v1.4</title>
   <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
   <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework_controls_dpad_tv.js"></script>
   <style>
     html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000}
-    /* cheese wheel */
     #cheeseCanvas{position:absolute;inset:0;z-index:10;pointer-events:none}
-    /* splash overlay */
     #splash{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,.8);z-index:5}
     #splash img{max-width:80%}
     #splash #version{color:#fff;margin-top:1em;font-size:1.2em}
-    /* timer */
     #timer{position:absolute;top:60%;left:50%;transform:translateX(-50%);color:#88f;font-size:1.2em;z-index:11;pointer-events:none}
-    /* debug text in front of wheel & splash */
     #debug{position:absolute;top:72%;left:50%;transform:translateX(-50%);color:#0f0;font-size:1em;z-index:15;pointer-events:none;opacity:.7;transition:opacity .3s}
-    /* hide CAF UI */
     cast-media-player{display:none}
-    /* menu */
     #menu{position:absolute;top:10%;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.7);padding:1em;border-radius:8px;gap:1em;z-index:20;display:none;flex-direction:row}
     #menu button{background:#fff;color:#000;border:none;padding:.5em 1em;font-size:1em;transition:background .1s}
     #menu button:focus{outline:2px solid #0af}
     #menu button.flash{background:#0f0 !important}
-    /* info pop‑up */
     #info{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(0);transform-origin:center;background:rgba(0,0,20,.9);border:2px solid #0af;color:#fff;padding:2em 2.5em;border-radius:14px;white-space:pre-line;z-index:30;font-size:1em;opacity:0;visibility:hidden;transition:transform .4s ease-out,opacity .4s ease-out,visibility 0s linear .4s}
     #info.show{transform:translate(-50%,-50%) scale(1);opacity:1;visibility:visible}
   </style>
 </head>
 <body tabindex="0">
-
-  <!-- cheese wheel -->
   <canvas id="cheeseCanvas"></canvas>
-
-  <!-- splash -->
-  <div id="splash">
-    <img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Loading…" />
-    <div id="version">v1.3 + 🧀</div>
-  </div>
-
-  <!-- timer & debug -->
+  <div id="splash"><img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Loading…" /><div id="version">v1.4 + 🧀</div></div>
   <div id="timer">Elapsed: 0.0 s</div>
   <div id="debug">Bereit – keine Aktion</div>
-
-  <!-- CAF player (hidden) -->
   <cast-media-player id="player"></cast-media-player>
-
-  <!-- menu -->
-  <div id="menu">
-    <button id="menu-stream">Stream</button>
-    <button id="menu-about">About</button>
-  </div>
-
-  <!-- pop‑up info box -->
+  <div id="menu"><button id="menu-stream">Stream</button><button id="menu-about">About</button></div>
   <div id="info"></div>
 
 <script>
-  /* -------------------- CONSTANTS -------------------- */
-  const ROTATION_PERIOD = 15;
-  const AUTO_START_MS   = 20_000;
-  const HOLE_COUNT      = 12;
-  const IDLE_TEXT       = 'Bereit – keine Aktion';
-
-  window.addEventListener('load',()=>{document.body.focus(); setIdle();});
-
-  /* -------------------- MENU / KEYS -------------------- */
-  const menu    = document.getElementById('menu');
-  const buttons = [...menu.querySelectorAll('button')];
-  let currentIdx=0;
-  const debug  = document.getElementById('debug');
-
-  function setIdle(){debug.textContent=IDLE_TEXT;debug.style.opacity=.7;}
-  function showDebug(text){
-    debug.textContent=text;
-    debug.style.opacity=1;
-    clearTimeout(showDebug.hideT);
-    showDebug.hideT=setTimeout(setIdle,2000);
-  }
-  function flash(btn){btn.classList.add('flash');setTimeout(()=>btn.classList.remove('flash'),200);}  
-  function select(idx){currentIdx=(idx+buttons.length)%buttons.length;buttons[currentIdx].focus();}
-  function handleKey(e){
-    const {key}=e;
-    if((key==='ArrowUp'||key==='ArrowDown')&&menu.style.display!=='flex'){
-      menu.style.display='flex';select(0);e.preventDefault();return;}
-    if(menu.style.display==='flex'){
-      if(key==='ArrowLeft')select(currentIdx-1);
-      else if(key==='ArrowRight')select(currentIdx+1);
-      else if(key==='Enter'){flash(buttons[currentIdx]);buttons[currentIdx].click();}
-      else if(key==='Escape')menu.style.display='none';
-      e.preventDefault();
-    }
-  }
-  window.addEventListener('keydown',handleKey);
-
-  /* -------------------- CHEESE WHEEL -------------------- */
-  const canvas=document.getElementById('cheeseCanvas');
-  const ctx=canvas.getContext('2d');
-  const timerEl=document.getElementById('timer');
-  let lastTs=null,angle=0;const startTime=performance.now();
-  const holes=[];
-  function genHoles(){
-    holes.length=0;
-    const w=canvas.width,h=canvas.height,r=Math.min(w,h)*0.3,cx=w/2,cy=h/2;
-    for(let i=0;i<HOLE_COUNT;i++){
-      const t=i/HOLE_COUNT*2*Math.PI;
-      const hr=r*(0.15+0.05*Math.random());
-      const hx=cx+Math.cos(t)*r*0.6*(0.8+0.2*Math.random());
-      const hy=cy+Math.sin(t)*r*0.6*(0.8+0.2*Math.random());
-      holes.push({hx,hy,hr});
-    }
-  }
-  function resize(){canvas.width=innerWidth;canvas.height=innerHeight;genHoles();}
-  window.addEventListener('resize',resize);resize();
-  function draw(ts){
-    if(lastTs===null)lastTs=ts;
-    const d=(ts-lastTs)/1000; lastTs=ts;
-    angle=(angle+d*(2*Math.PI/ROTATION_PERIOD))%(2*Math.PI);
-    timerEl.textContent=`Elapsed: ${((performance.now()-startTime)/1000).toFixed(1)} s`;
-    const w=canvas.width,h=canvas.height,r=Math.min(w,h)*0.3,cx=w/2,cy=h/2;
-    ctx.clearRect(0,0,w,h);
-    ctx.save();ctx.translate(cx,cy);ctx.rotate(angle);ctx.translate(-cx,-cy);
-    ctx.beginPath();ctx.arc(cx,cy,r,0,2*Math.PI);
-    ctx.fillStyle='#2277cc';ctx.fill();ctx.lineWidth=r*0.05;ctx.strokeStyle='#1155aa';ctx.stroke();
-    ctx.fillStyle='#114477';
-    holes.forEach(({hx,hy,hr})=>{ctx.beginPath();ctx.arc(hx,hy,hr,0,2*Math.PI);ctx.fill();});
-    ctx.restore();
-    requestAnimationFrame(draw);
-  }
-  requestAnimationFrame(draw);
-
-  /* -------------------- CAF SETUP -------------------- */
-  const STREAM_NS='urn:x-cast:com.example.stream';
-  const castCtx=cast.framework.CastReceiverContext.getInstance();
-  const mgr=castCtx.getPlayerManager();
-  const opts=new cast.framework.CastReceiverOptions(); opts.disableIdleTimeout=true;
-  mgr.setPlaybackConfig({autoResumeNumberOfSegments:1});
-  mgr.setMessageInterceptor(cast.framework.messages.MessageType.LOAD,req=>(req.autoplay=true,req));
-  castCtx.start(opts);
-  mgr.addEventListener(cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,()=>document.getElementById('splash').style.display='none');
-
-  /* -------------------- POP‑UP -------------------- */
-  const info=document.getElementById('info');
-  function showInfo(){
-    const now=new Date().toLocaleTimeString();
-    info.textContent=`Hi Linda!\nHier ist ein selbstgebauter Player.\nLieben Gruß, Christoph\n\n${now}`;
-    info.classList.remove('show'); void info.offsetWidth; info.classList.add('show');
-    setTimeout(()=>info.classList.remove('show'),5000);
-  }
-
-  /* -------------------- MENU BUTTON EVENTS -------------------- */
-  const bus=castCtx.getCastMessageBus(STREAM_NS);
-  document.getElementById('menu-stream').addEventListener('click',()=>{
-    bus.send({type:'start'});
-    document.getElementById('splash').style.display='none';
-    menu.style.display='none';
-    showDebug('Aktion: Stream');
-  });
-  document.getElementById('menu-about').addEventListener('click',()=>{
-    showInfo();
-    menu.style.display='none';
-    showDebug('Aktion: About');
-  });
-
-  /* -------------------- AUTO‑START -------------------- */
-  const autoStart=setTimeout(()=>{
-    if(menu.style.display!=='flex'){
-      bus.send({type:'start'});
-      document.getElementById('splash').style.display='none';
-      showDebug('Auto‑Start: Stream');
-    }
-  },AUTO_START_MS);
-  buttons.forEach(b=>b.addEventListener('focus',()=>clearTimeout(autoStart)));
+const ROTATION_PERIOD=15,AUTO_START_MS=20000,HOLE_COUNT=12,IDLE_TEXT='Bereit – keine Aktion';
+window.addEventListener('load',()=>{document.body.focus();setIdle();});
+const menu=document.getElementById('menu'),buttons=[...menu.querySelectorAll('button')];let currentIdx=0;const debug=document.getElementById('debug');
+function setIdle(){debug.textContent=IDLE_TEXT;debug.style.opacity=.7;}
+function showDebug(t){debug.textContent=t;debug.style.opacity=1;clearTimeout(showDebug.t);showDebug.t=setTimeout(setIdle,2000);} 
+function flash(b){b.classList.add('flash');setTimeout(()=>b.classList.remove('flash'),200);} 
+function select(i){currentIdx=(i+buttons.length)%buttons.length;buttons[currentIdx].focus();}
+function handleKey(e){const k=e.key;if((k==='ArrowUp'||k==='ArrowDown')&&menu.style.display!=='flex'){menu.style.display='flex';select(0);e.preventDefault();return;}if(menu.style.display==='flex'){if(k==='ArrowLeft')select(currentIdx-1);else if(k==='ArrowRight')select(currentIdx+1);else if(k==='Enter'||k==='OK'){flash(buttons[currentIdx]);showDebug('Aktion: '+buttons[currentIdx].textContent);buttons[currentIdx].click();}else if(k==='Escape')menu.style.display='none';e.preventDefault();}}
+window.addEventListener('keydown',handleKey);
+const canvas=document.getElementById('cheeseCanvas'),ctx=canvas.getContext('2d'),timerEl=document.getElementById('timer');let lastTs=null,angle=0;const startTime=performance.now(),holes=[];function genHoles(){holes.length=0;const w=canvas.width,h=canvas.height,r=Math.min(w,h)*.3,cx=w/2,cy=h/2;for(let i=0;i<HOLE_COUNT;i++){const t=i/HOLE_COUNT*2*Math.PI,hr=r*(.15+.05*Math.random()),hx=cx+Math.cos(t)*r*.6*(.8+.2*Math.random()),hy=cy+Math.sin(t)*r*.6*(.8+.2*Math.random());holes.push({hx,hy,hr});}}function resize(){canvas.width=innerWidth;canvas.height=innerHeight;genHoles();}window.addEventListener('resize',resize);resize();function draw(ts){if(lastTs===null)lastTs=ts;const d=(ts-lastTs)/1000;lastTs=ts;angle=(angle+d*(2*Math.PI/ROTATION_PERIOD))%(2*Math.PI);timerEl.textContent=`Elapsed: ${((performance.now()-startTime)/1000).toFixed(1)} s`;const w=canvas.width,h=canvas.height,r=Math.min(w,h)*.3,cx=w/2,cy=h/2;ctx.clearRect(0,0,w,h);ctx.save();ctx.translate(cx,cy);ctx.rotate(angle);ctx.translate(-cx,-cy);ctx.beginPath();ctx.arc(cx,cy,r,0,2*Math.PI);ctx.fillStyle='#2277cc';ctx.fill();ctx.lineWidth=r*.05;ctx.strokeStyle='#1155aa';ctx.stroke();ctx.fillStyle='#114477';holes.forEach(({hx,hy,hr})=>{ctx.beginPath();ctx.arc(hx,hy,hr,0,2*Math.PI);ctx.fill();});ctx.restore();requestAnimationFrame(draw);}requestAnimationFrame(draw);
+const STREAM_NS='urn:x-cast:com.example.stream',castCtx=cast.framework.CastReceiverContext.getInstance(),mgr=castCtx.getPlayerManager();const opts=new cast.framework.CastReceiverOptions();opts.disableIdleTimeout=true;mgr.setPlaybackConfig({autoResumeNumberOfSegments:1});mgr.setMessageInterceptor(cast.framework.messages.MessageType.LOAD,req=>(req.autoplay=true,req));castCtx.start(opts);mgr.addEventListener(cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,()=>document.getElementById('splash').style.display='none');
+const info=document.getElementById('info');function showInfo(){const now=new Date().toLocaleTimeString();info.textContent=`Hi Linda!\nHier ist ein selbstgebauter Player.\nLieben Gruß, Christoph\n\n${now}`;info.classList.remove('show');void info.offsetWidth;info.classList.add('show');setTimeout(()=>info.classList.remove('show'),5000);}const bus=castCtx.getCastMessageBus(STREAM_NS);document.getElementById('menu-stream').addEventListener('click',()=>{bus.send({type:'start'});document.getElementById('splash').style.display='none';menu.style.display='none';showDebug('Aktion: Stream');});document.getElementById('menu-about').addEventListener('click',()=>{showInfo();menu.style.display='none';showDebug('Aktion: About');});
+const autoStart=setTimeout(()=>{if(menu.style.display!=='flex'){bus.send({type:'start'});document.getElementById('splash').style.display='none';showDebug('Auto‑Start: Stream');}},AUTO_START_MS);buttons.forEach(b=>b.addEventListener('focus',()=>clearTimeout(autoStart)));
 </script>
-
 </body>
 </html>
