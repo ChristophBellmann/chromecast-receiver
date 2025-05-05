@@ -2,105 +2,108 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Low-Latency Receiver v0.13</title>
+    <title>Low-Latency Receiver v0.14</title>
     <!-- CAF Receiver SDK v3 + D-Pad support for built-in TVs -->
     <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
     <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework_controls_dpad_tv.js"></script>
     <style>
       html, body {
-        margin: 0; padding: 0;
-        width: 100%; height: 100%;
-        background: black; overflow: hidden;
+        margin:0; padding:0;
+        width:100%; height:100%;
+        background:black; overflow:hidden;
       }
       /* 1) Splash screen */
       #splash {
-        position: absolute; inset: 0;
-        display: flex; flex-direction: column;
-        align-items: center; justify-content: center;
-        background: black; z-index: 10;
+        position:absolute; inset:0;
+        display:flex; flex-direction:column;
+        align-items:center; justify-content:center;
+        background:black; z-index:10;
       }
       #splash img {
-        max-width: 80%; height: auto;
+        max-width:80%; height:auto;
       }
       #splash #version {
-        color: white; margin-top: 1em; font-size: 1.2em;
+        color:white; margin-top:1em; font-size:1.2em;
       }
-      /* 2) Key-catcher overlay to grab all D-pad keys */
-      #key-catcher {
-        position: absolute; inset: 0;
-        z-index: 15; outline: none;
-      }
-      /* 3) CAF-managed video player */
+      /* 2) CAF player */
       cast-media-player {
-        position: absolute; inset: 0;
-        width: 100%; height: 100%;
-        --media-background-color: black;
-        --media-splash-image: url('https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png');
-        --media-splash-image-size: contain;
-        --media-splash-image-position: center center;
-        --media-control-bar-display: none;
-        z-index: 5;
+        position:absolute; inset:0;
+        --media-background-color:black;
+        --media-splash-image:
+          url('https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png');
+        --media-splash-image-size:contain;
+        --media-splash-image-position:center center;
+        --media-control-bar-display:none;
+        z-index:5;
       }
-      /* 4) Vertical menu */
+      /* 3) Key-catcher overlay (hidden until splash loads) */
+      #key-catcher {
+        position:absolute; inset:0;
+        z-index:15; outline:none;
+        display:none;
+      }
+      /* 4) Vertical menu (loaded after splash) */
       #menu {
-        position: absolute; top: 30%; left: 50%;
-        transform: translateX(-50%);
-        display: none;
-        flex-direction: column;
-        gap: 1em;
-        background: rgba(0,0,0,0.8);
-        padding: 1em; border-radius: 8px;
-        z-index: 20;
+        position:absolute; top:30%; left:50%;
+        transform:translateX(-50%);
+        display:none;
+        flex-direction:column;
+        gap:1em;
+        background:rgba(0,0,0,0.8);
+        padding:1em; border-radius:8px;
+        z-index:20;
       }
       #menu button {
-        background: white; color: black;
-        border: none; padding: 0.75em 1.5em;
-        font-size: 1em;
+        background:white; color:black;
+        border:none; padding:0.75em 1.5em;
+        font-size:1em;
       }
       #menu button:focus {
-        outline: 2px solid #0af;
+        outline:2px solid #0af;
       }
       /* 5) Info overlay */
       #info {
-        position: absolute; bottom: 5%; left: 5%;
-        background: rgba(0,0,0,0.8); color: white;
-        padding: 1em; white-space: pre-line;
-        font-size: 0.9em; z-index: 20;
-        display: none;
+        position:absolute; bottom:5%; left:5%;
+        background:rgba(0,0,0,0.8); color:white;
+        padding:1em; white-space:pre-line;
+        font-size:0.9em; z-index:20;
+        display:none;
       }
     </style>
   </head>
   <body>
-    <!-- Splash -->
+    <!-- 1) Splash -->
     <div id="splash">
-      <img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Loading…">
-      <div id="version">v0.13</div>
+      <img id="splash-img"
+           src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png"
+           alt="Loading…">
+      <div id="version">v0.14</div>
     </div>
 
-    <!-- Key-catcher to capture D-pad/Enter/Back -->
-    <div id="key-catcher" tabindex="0"></div>
-
-    <!-- CAF-managed player -->
+    <!-- 2) CAF-managed player -->
     <cast-media-player id="player"></cast-media-player>
 
-    <!-- Vertical Stream/About menu -->
+    <!-- 3) Key-catcher (will be shown after splash loads) -->
+    <div id="key-catcher" tabindex="0"></div>
+
+    <!-- 4) Vertical Stream/About menu -->
     <div id="menu">
       <button id="menu-stream">Stream</button>
       <button id="menu-about">About</button>
     </div>
 
-    <!-- Info box -->
+    <!-- 5) Info box -->
     <div id="info"></div>
 
     <script>
       const STREAM_NS = 'urn:x-cast:com.example.stream';
 
-      // 1) Initialize CAF
+      // Initialize CAF
       const context       = cast.framework.CastReceiverContext.getInstance();
       const playerManager = context.getPlayerManager();
       const options       = new cast.framework.CastReceiverOptions();
       options.disableIdleTimeout = true;
-      // low-latency resume after 1 segment
+      // low-latency: resume after 1 segment
       const cfg = playerManager.getPlaybackConfig();
       cfg.autoResumeNumberOfSegments = 1;
       playerManager.setPlaybackConfig(cfg);
@@ -111,80 +114,69 @@
       );
       context.start(options);
 
-      // 2) Remove any auto-hide of the splash (we’ll hide it manually on “Stream”)
-
-      // 3) Set up message bus for “start”
+      // Setup message bus for “start”
       const bus = context.getCastMessageBus(STREAM_NS);
 
-      // 4) Grab DOM elements
-      const catcher = document.getElementById('key-catcher');
-      const menu    = document.getElementById('menu');
-      const info    = document.getElementById('info');
-      const items   = Array.from(menu.querySelectorAll('button'));
+      // Grab DOM elements
+      const splashImg = document.getElementById('splash-img');
+      const catcher   = document.getElementById('key-catcher');
+      const menu      = document.getElementById('menu');
+      const info      = document.getElementById('info');
+      const items     = Array.from(menu.querySelectorAll('button'));
       let idx = 0;
 
-      // Keep focus on the catcher so it gets key events
-      window.addEventListener('load', () => catcher.focus());
-
-      function showMenu() {
-        menu.style.display = 'flex';
-        idx = 0;
-        items[idx].focus();
-      }
-      function hideMenu() {
-        menu.style.display = 'none';
-      }
-
-      // 5) Handle keys on the catcher
-      catcher.addEventListener('keydown', e => {
-        e.preventDefault(); e.stopPropagation();
-        switch (e.keyCode) {
-          case 38: // Up
-            if (menu.style.display === 'flex') {
-              idx = (idx + items.length - 1) % items.length;
-              items[idx].focus();
-            } else {
-              showMenu();
-            }
-            break;
-          case 40: // Down
-            if (menu.style.display === 'flex') {
-              idx = (idx + 1) % items.length;
-              items[idx].focus();
-            } else {
-              showMenu();
-            }
-            break;
-          case 13: // Enter
-            if (menu.style.display === 'flex') {
-              items[idx].click();
-            }
-            break;
-          case 8:  // Back (Backspace) on many TVs
-          case 10009: // Tizen Back
-            hideMenu();
-            break;
-        }
-      });
-
-      // 6) “Stream” button: hide splash, hide menu, send start
-      document.getElementById('menu-stream').addEventListener('click', () => {
-        document.getElementById('splash').style.display = 'none';
-        hideMenu();
-        bus.send({ type: 'start' });
+      // ¼ After splash image fully loads, reveal the key-catcher & menu code
+      splashImg.onload = () => {
+        catcher.style.display = 'block';
         catcher.focus();
-      });
 
-      // 7) “About” button: hide menu, show greeting
-      document.getElementById('menu-about').addEventListener('click', () => {
-        hideMenu();
-        const now = new Date().toLocaleTimeString();
-        info.textContent =
-          `Hi Linda!\nHier ist ein selbstgebauter Player.\nLieben Gruß, Christoph\n\n` +
-          `Local Time: ${now}`;
-        info.style.display = 'block';
-        catcher.focus();
-      });
+        catcher.addEventListener('keydown', e => {
+          e.preventDefault(); e.stopPropagation();
+          switch (e.keyCode) {
+            case 38: // Up
+            case 40: // Down
+              if (menu.style.display==='flex') {
+                // move selection
+                idx = (e.keyCode===38)
+                  ? (idx + items.length - 1) % items.length
+                  : (idx + 1) % items.length;
+                items[idx].focus();
+              } else {
+                menu.style.display = 'flex';
+                idx = 0; items[0].focus();
+              }
+              break;
+            case 13: // Enter
+              if (menu.style.display==='flex') items[idx].click();
+              break;
+            case 8: // Back on many TVs
+            case 10009: // Tizen Back
+              menu.style.display = 'none';
+              break;
+          }
+        });
+      };
+
+      // “Stream”: hide splash, hide menu, send start
+      document.getElementById('menu-stream')
+        .addEventListener('click', () => {
+          document.getElementById('splash').style.display = 'none';
+          menu.style.display = 'none';
+          bus.send({ type:'start' });
+          catcher.focus();
+        });
+
+      // “About”: hide menu, show greeting
+      document.getElementById('menu-about')
+        .addEventListener('click', () => {
+          menu.style.display = 'none';
+          const now = new Date().toLocaleTimeString();
+          info.textContent =
+            `Hi Linda!\nHier ist ein selbstgebauter Player.\nLieben Gruß, Christoph\n\n` +
+            `Local Time: ${now}`;
+          info.style.display = 'block';
+          catcher.focus();
+        });
     </script>
   </body>
 </html>
