@@ -1,41 +1,207 @@
 <!DOCTYPE html>
 <html>
-<head>…same as before…</head>
-<body>
-  <cast-media-player id="player"></cast-media-player>
-  <script>
-    const context = cast.framework.CastReceiverContext.getInstance();
-    const playerManager = context.getPlayerManager();
+  <head>
+    <meta charset="utf-8" />
+    <title>Low-Latency Receiver</title>
+    <script src="https://www.gstatic.com/cast/sdk/libs/receiver/2.0.0/cast_receiver.js"></script>
+    <style>
+      html, body {
+        margin: 0; padding: 0; width: 100%; height: 100%;
+        background: black; overflow: hidden;
+      }
+      cast-media-player {
+        display: none;
+        width: 100%; height: 100%;
+        position: absolute; top: 0; left: 0;
+      }
+      /* Menu overlay */
+      #menu {
+        position: absolute; top: 40%; left: 50%;
+        transform: translate(-50%, -50%);
+        display: flex; gap: 2rem;
+        z-index: 1000;
+      }
+      #menu button {
+        font-size: 2rem; padding: 1rem 2rem;
+        background: rgba(255,255,255,0.1);
+        border: 2px solid white; color: white;
+      }
+      #menu button:focus {
+        outline: 3px solid #0af;
+      }
+      /* About dialog */
+      #about {
+        position: absolute; top: 50%; left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0,0,0,0.8);
+        color: white; padding: 2rem;
+        border-radius: 8px; display: none; z-index: 1001;
+        max-width: 80%; text-align: center;
+      }
+      #about button {
+        margin-top: 1rem; font-size: 1.2rem; padding: 0.5rem 1rem;
+      }
+      /* Info dialog */
+      #info {
+        position: absolute; top: 50%; left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0,0,0,0.8);
+        color: white; padding: 2rem;
+        border-radius: 8px; display: none; z-index: 1002;
+        max-width: 80%; text-align: left;
+        font-family: monospace;
+      }
+      #info div {
+        margin: 0.5rem 0;
+      }
+      #info button {
+        margin-top: 1rem; font-size: 1rem; padding: 0.5rem 1rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="menu">
+      <button id="stream-btn" tabindex="1">Stream</button>
+      <button id="about-btn" tabindex="2">About</button>
+      <button id="info-btn" tabindex="3">Info</button>
+    </div>
 
-    // Intercept the LOAD request
-    playerManager.setMessageInterceptor(
-      cast.framework.messages.MessageType.LOAD,
-      (loadRequestData) => {
-        loadRequestData.autoplay = false;  // we’ll start it manually
+    <div id="about">
+      <h2>Low-Latency Receiver</h2>
+      <p>Hi Linda! Hier ist ein selbstgebauter Player.<br/>Lieben Gruß, Christoph</p>
+      <button id="about-close" tabindex="4">Close</button>
+    </div>
 
-        // extract ?ts= from the contentId
-        let url = new URL(loadRequestData.media.contentId);
-        const ts = parseInt(url.searchParams.get("ts"));
-        if (ts) {
-          const now = Date.now();
-          const offsetSec = (now - ts) / 1000;
-          console.log("Sync offset (s):", offsetSec);
-          loadRequestData.currentTime = offsetSec;
+    <div id="info">
+      <h2>Info</h2>
+      <div id="ping">Ping: -- ms</div>
+      <div id="time">Local Time: --:--:--</div>
+      <div id="delay">Stream Delay: -- s</div>
+      <div id="video-info">Video: -- × --</div>
+      <div id="audio-info">Audio: AAC 192 kbps, Stereo</div>
+      <button id="info-close" tabindex="5">Close</button>
+    </div>
+
+    <cast-media-player id="player"></cast-media-player>
+
+    <script>
+      const context = cast.framework.CastReceiverContext.getInstance();
+      const playerManager = context.getPlayerManager();
+
+      let streamUrl = null;
+      let startTs   = null;
+
+      const menu       = document.getElementById('menu');
+      const aboutBox   = document.getElementById('about');
+      const infoBox    = document.getElementById('info');
+      const buttons    = Array.from(menu.querySelectorAll('button'));
+      let idx = 0;
+
+      // Show menu on Up/Down
+      document.body.addEventListener('keydown', e => {
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+          menu.style.display = 'flex';
+          idx = 0;
+          buttons[idx].focus();
         }
-        return loadRequestData;
-      }
-    );
+      });
+      // Navigate menu
+      document.body.addEventListener('keydown', e => {
+        if (menu.style.display !== 'none') {
+          if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+            idx = (idx + buttons.length - 1) % buttons.length;
+            buttons[idx].focus();
+          } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+            idx = (idx + 1) % buttons.length;
+            buttons[idx].focus();
+          } else if (e.key === 'Enter' || e.key === ' ') {
+            buttons[idx].click();
+          }
+        }
+      });
 
-    // once ready, actually start playback
-    context.addEventListener(
-      cast.framework.system.EventType.READY,
-      () => {
-        console.log("Receiver ready, calling load...");
-        // The actual LOAD message comes automatically after start()
-      }
-    );
+      document.getElementById('stream-btn').addEventListener('click', () => {
+        menu.style.display = 'none';
+      });
+      document.getElementById('about-btn').addEventListener('click', () => {
+        aboutBox.style.display = 'block';
+        document.getElementById('about-close').focus();
+      });
+      document.getElementById('about-close').addEventListener('click', () => {
+        aboutBox.style.display = 'none';
+        buttons[idx].focus();
+      });
 
-    context.start({ disableIdleTimeout: true });
-  </script>
-</body>
+      document.getElementById('info-btn').addEventListener('click', () => {
+        // populate info fields
+        const now       = new Date();
+        document.getElementById('time').textContent  = `Local Time: ${now.toLocaleTimeString()}`;
+        // Ping the stream URL
+        if (streamUrl) {
+          const t0 = Date.now();
+          fetch(streamUrl, { method: 'HEAD' }).then(() => {
+            const ping = Date.now() - t0;
+            document.getElementById('ping').textContent = `Ping: ${ping} ms`;
+          }).catch(_=>{
+            document.getElementById('ping').textContent = 'Ping: error';
+          });
+        }
+        // Delay
+        if (startTs) {
+          const delay = ((Date.now() - startTs)/1000).toFixed(2);
+          document.getElementById('delay').textContent = `Stream Delay: ${delay} s`;
+        }
+        // Video resolution
+        const videoEl = document.querySelector('video');
+        if (videoEl) {
+          document.getElementById('video-info').textContent =
+            `Video: ${videoEl.videoWidth}×${videoEl.videoHeight}`;
+        }
+        // Audio info is static based on our stream config
+
+        infoBox.style.display = 'block';
+        document.getElementById('info-close').focus();
+      });
+      document.getElementById('info-close').addEventListener('click', () => {
+        infoBox.style.display = 'none';
+        buttons[idx].focus();
+      });
+
+      // Sync on LOAD
+      playerManager.setMessageInterceptor(
+        cast.framework.messages.MessageType.LOAD,
+        loadRequestData => {
+          menu.style.display    = 'none';
+          aboutBox.style.display = 'none';
+          infoBox.style.display   = 'none';
+          document.getElementById('player').style.display = 'block';
+
+          loadRequestData.autoplay = true;
+          try {
+            const url = new URL(loadRequestData.media.contentId);
+            streamUrl = loadRequestData.media.contentId;
+            startTs   = parseInt(url.searchParams.get('ts'));
+            if (!isNaN(startTs)) {
+              loadRequestData.currentTime = (Date.now() - startTs)/1000;
+            }
+          } catch (e) {}
+          return loadRequestData;
+        }
+      );
+
+      // Re-sync on resume
+      playerManager.addEventListener(
+        cast.framework.events.EventType.PLAYING, () => {
+          if (startTs) {
+            playerManager.seek((Date.now() - startTs)/1000);
+          }
+        }
+      );
+
+      // Start receiver
+      const options = new cast.framework.CastReceiverOptions();
+      options.disableIdleTimeout = true;
+      context.start(options);
+    </script>
+  </body>
 </html>
