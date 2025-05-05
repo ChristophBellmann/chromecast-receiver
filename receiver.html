@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Low-Latency Receiver v0.12</title>
+    <title>Low-Latency Receiver v0.13</title>
     <!-- CAF Receiver SDK v3 + D-Pad support for built-in TVs -->
     <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
     <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework_controls_dpad_tv.js"></script>
@@ -12,7 +12,7 @@
         width: 100%; height: 100%;
         background: black; overflow: hidden;
       }
-      /* splash */
+      /* 1) Splash screen */
       #splash {
         position: absolute; inset: 0;
         display: flex; flex-direction: column;
@@ -25,12 +25,12 @@
       #splash #version {
         color: white; margin-top: 1em; font-size: 1.2em;
       }
-      /* full-screen key catcher */
+      /* 2) Key-catcher overlay to grab all D-pad keys */
       #key-catcher {
         position: absolute; inset: 0;
-        z-index: 20; outline: none;
+        z-index: 15; outline: none;
       }
-      /* CAF player */
+      /* 3) CAF-managed video player */
       cast-media-player {
         position: absolute; inset: 0;
         width: 100%; height: 100%;
@@ -41,7 +41,7 @@
         --media-control-bar-display: none;
         z-index: 5;
       }
-      /* vertical menu */
+      /* 4) Vertical menu */
       #menu {
         position: absolute; top: 30%; left: 50%;
         transform: translateX(-50%);
@@ -50,7 +50,7 @@
         gap: 1em;
         background: rgba(0,0,0,0.8);
         padding: 1em; border-radius: 8px;
-        z-index: 30;
+        z-index: 20;
       }
       #menu button {
         background: white; color: black;
@@ -60,42 +60,42 @@
       #menu button:focus {
         outline: 2px solid #0af;
       }
-      /* info overlay */
+      /* 5) Info overlay */
       #info {
         position: absolute; bottom: 5%; left: 5%;
         background: rgba(0,0,0,0.8); color: white;
         padding: 1em; white-space: pre-line;
-        font-size: 0.9em; z-index: 30;
+        font-size: 0.9em; z-index: 20;
         display: none;
       }
     </style>
   </head>
   <body>
-    <!-- 1) Splash screen -->
+    <!-- Splash -->
     <div id="splash">
       <img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Loading…">
-      <div id="version">v0.12</div>
+      <div id="version">v0.13</div>
     </div>
 
-    <!-- 2) Key catcher to grab D-pad -->
+    <!-- Key-catcher to capture D-pad/Enter/Back -->
     <div id="key-catcher" tabindex="0"></div>
 
-    <!-- 3) CAF-managed player -->
+    <!-- CAF-managed player -->
     <cast-media-player id="player"></cast-media-player>
 
-    <!-- 4) Vertical menu -->
+    <!-- Vertical Stream/About menu -->
     <div id="menu">
       <button id="menu-stream">Stream</button>
       <button id="menu-about">About</button>
     </div>
 
-    <!-- 5) Info box -->
+    <!-- Info box -->
     <div id="info"></div>
 
     <script>
       const STREAM_NS = 'urn:x-cast:com.example.stream';
 
-      // Initialize CAF
+      // 1) Initialize CAF
       const context       = cast.framework.CastReceiverContext.getInstance();
       const playerManager = context.getPlayerManager();
       const options       = new cast.framework.CastReceiverOptions();
@@ -111,19 +111,19 @@
       );
       context.start(options);
 
-      // no auto-hide of splash
+      // 2) Remove any auto-hide of the splash (we’ll hide it manually on “Stream”)
 
-      // setup custom namespace bus
+      // 3) Set up message bus for “start”
       const bus = context.getCastMessageBus(STREAM_NS);
 
-      // grab elements
+      // 4) Grab DOM elements
       const catcher = document.getElementById('key-catcher');
       const menu    = document.getElementById('menu');
       const info    = document.getElementById('info');
       const items   = Array.from(menu.querySelectorAll('button'));
       let idx = 0;
 
-      // ensure catcher focused
+      // Keep focus on the catcher so it gets key events
       window.addEventListener('load', () => catcher.focus());
 
       function showMenu() {
@@ -135,12 +135,12 @@
         menu.style.display = 'none';
       }
 
-      // D-pad + Enter + Back handling
+      // 5) Handle keys on the catcher
       catcher.addEventListener('keydown', e => {
         e.preventDefault(); e.stopPropagation();
         switch (e.keyCode) {
           case 38: // Up
-            if (menu.style.display==='flex') {
+            if (menu.style.display === 'flex') {
               idx = (idx + items.length - 1) % items.length;
               items[idx].focus();
             } else {
@@ -148,34 +148,34 @@
             }
             break;
           case 40: // Down
-            if (menu.style.display==='flex') {
+            if (menu.style.display === 'flex') {
               idx = (idx + 1) % items.length;
               items[idx].focus();
             } else {
               showMenu();
             }
             break;
-          case 13: // Enter (middle button)
-            if (menu.style.display==='flex') {
+          case 13: // Enter
+            if (menu.style.display === 'flex') {
               items[idx].click();
             }
             break;
-          case 10009: // Back (Tizen) or Backspace
-          case 8:
+          case 8:  // Back (Backspace) on many TVs
+          case 10009: // Tizen Back
             hideMenu();
             break;
         }
       });
 
-      // Stream: hide splash + menu, send start
+      // 6) “Stream” button: hide splash, hide menu, send start
       document.getElementById('menu-stream').addEventListener('click', () => {
         document.getElementById('splash').style.display = 'none';
         hideMenu();
-        bus.send({ type:'start' });
+        bus.send({ type: 'start' });
         catcher.focus();
       });
 
-      // About: hide menu, show greeting
+      // 7) “About” button: hide menu, show greeting
       document.getElementById('menu-about').addEventListener('click', () => {
         hideMenu();
         const now = new Date().toLocaleTimeString();
