@@ -95,14 +95,17 @@
     <div id="info"></div>
 
     <script>
-      // Force focus so keydown events fire
+      // Force focus so key events fire
       window.addEventListener('load', () => {
         document.body.focus();
       });
 
-      // === rotating cheese wheel & timer (1 rotation per 5s) ===
+      // === rotating cheese wheel & timer (1 rotation per 5 seconds) ===
       const canvas = document.getElementById('cheeseCanvas');
       const ctx    = canvas.getContext('2d');
+      const timerEl = document.getElementById('timer');
+      let startTs = null;
+
       function resizeCanvas() {
         canvas.width  = window.innerWidth;
         canvas.height = window.innerHeight;
@@ -110,54 +113,52 @@
       window.addEventListener('resize', resizeCanvas);
       resizeCanvas();
 
-      let angle = 0, lastTs = null, startTs = null;
-      const timerEl = document.getElementById('timer');
-
       function drawCheese(ts) {
         if (startTs === null) startTs = ts;
-        if (lastTs === null)  lastTs  = ts;
-        // update elapsed timer
-        const elapsedS = ((ts - startTs) / 1000).toFixed(1);
-        timerEl.textContent = 'Elapsed: ' + elapsedS + ' s';
+        const elapsedMs = ts - startTs;
+        const elapsedS  = elapsedMs / 1000;
+        timerEl.textContent = 'Elapsed: ' + elapsedS.toFixed(1) + ' s';
 
-        // time delta
-        const deltaS = (ts - lastTs) / 1000;
-        lastTs = ts;
-        // one full rotation per 5 seconds → (2π rad) / 5
-        angle = (angle + deltaS * (2 * Math.PI / 5)) % (2 * Math.PI);
+        // compute angle: full circle every 5s
+        const angle = (elapsedS % 5) * (2 * Math.PI / 5);
 
-        // draw
         const w = canvas.width, h = canvas.height;
-        const r = Math.min(w,h)*0.3, cx = w/2, cy = h/2;
+        const r = Math.min(w,h) * 0.3;
+        const cx = w/2, cy = h/2;
+
         ctx.clearRect(0,0,w,h);
         ctx.save();
         ctx.translate(cx,cy);
         ctx.rotate(angle);
         ctx.translate(-cx,-cy);
+
+        // draw wheel
         ctx.beginPath();
         ctx.arc(cx,cy,r,0,2*Math.PI);
         ctx.fillStyle   = '#2277cc';
         ctx.fill();
-        ctx.lineWidth   = r*0.05;
+        ctx.lineWidth   = r * 0.05;
         ctx.strokeStyle = '#1155aa';
         ctx.stroke();
-        for (let i=0; i<12; i++){
-          const t  = (i/12)*2*Math.PI;
-          const hr = r*(0.2+0.1*Math.random());
-          const hx = cx + Math.cos(t)*r*0.6*(0.7+0.3*Math.random());
-          const hy = cy + Math.sin(t)*r*0.6*(0.7+0.3*Math.random());
+
+        // draw holes
+        for (let i = 0; i < 12; i++) {
+          const t  = (i/12) * 2 * Math.PI;
+          const hr = r * (0.2 + 0.1 * Math.random());
+          const hx = cx + Math.cos(t) * r * 0.6 * (0.7 + 0.3 * Math.random());
+          const hy = cy + Math.sin(t) * r * 0.6 * (0.7 + 0.3 * Math.random());
           ctx.beginPath();
-          ctx.arc(hx,hy,hr,0,2*Math.PI);
+          ctx.arc(hx, hy, hr, 0, 2 * Math.PI);
           ctx.fillStyle = '#114477';
           ctx.fill();
         }
-        ctx.restore();
 
+        ctx.restore();
         requestAnimationFrame(drawCheese);
       }
       requestAnimationFrame(drawCheese);
 
-      // === CAF + menu + auto-start after 20s ===
+      // === CAF initialization + menu + auto-start ===
       const STREAM_NS = 'urn:x-cast:com.example.stream';
       const context   = cast.framework.CastReceiverContext.getInstance();
       const mgr       = context.getPlayerManager();
@@ -199,7 +200,7 @@
       });
 
       document.getElementById('menu-stream').addEventListener('click', () => {
-        bus.send({type:'start'});
+        bus.send({ type:'start' });
         document.getElementById('splash').style.display = 'none';
         menu.style.display = 'none';
       });
@@ -213,7 +214,7 @@
       });
 
       setTimeout(() => {
-        bus.send({type:'start'});
+        bus.send({ type:'start' });
         document.getElementById('splash').style.display = 'none';
       }, 20000);
     </script>
