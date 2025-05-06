@@ -36,7 +36,7 @@
   /* UI */
   function selBtn(i){btn[sel].classList.remove('sel');sel=(i+3)%3;btn[sel].classList.add('sel')}
   function press(b){b.classList.add('pressed');setTimeout(()=>b.classList.remove('pressed'),150)}
-  btn[0].onclick=()=>{press(btn[0]);sph.style.display='none';bus.send({type:'start'})};
+  btn[0].onclick=()=>{press(btn[0]);sph.style.display='none';document.getElementById("box").style.display = "none";bus.send({type:'start'})};
   btn[1].onclick=()=>{press(btn[1]);pan.innerHTML="<h1>Hi Linda 🎵</h1><p>Liebe Grüße</p>";clearInterval(tm)};
   btn[2].onclick=()=>{press(btn[2]);tick();clearInterval(tm);tm=setInterval(tick,1e3)};
   function tick(){const d=new Date();pan.innerHTML=`<h1>${d.toLocaleTimeString()}</h1><p>${d.toLocaleDateString()}</p>`}
