@@ -1,56 +1,191 @@
-<!DOCTYPE html><html><head><meta charset="utf-8">
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
   <title>Cast v4.8</title>
+  <!-- Google Cast CAF Receiver SDK -->
   <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
-  <style>:root{--a:#0af}*{margin:0;box-sizing:border-box}html,body{height:100%;overflow:hidden;background:#000;font-family:system-ui}
-  #pre,#wrap,#splash,#box{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
-  #pre{flex-direction:column;z-index:30;transition:opacity .1s}
-  #ver{color:#fff;font:600 2.3em system-ui;opacity:0;transition:opacity .1s}
-  #wrap{display:none;opacity:0;transition:opacity .1s}
-  #wrap canvas{width:60vmin;height:60vmin;background:transparent}
-  #splash{display:none;opacity:0;transition:opacity .25s;z-index:0}
-  #splash img{width:100%;height:100%;object-fit:cover}
-  #box{z-index:10;flex-direction:column}
-  #panel{background:rgba(34,34,34,.85);border:4px solid var(--a);border-radius:16px;padding:1.8em 3em;min-width:50vw;color:#fff;text-align:center}
-  #menu{position:absolute;top:1em;left:50%;transform:translateX(-50%);display:flex;gap:.6em;background:rgba(0,0,0,.6);padding:.6em 1em;border-radius:10px;z-index:20}
-  #menu button{background:#fff;border:none;border-radius:8px;padding:.5em 1.2em;font-size:1em}
-  #menu .sel{outline:3px solid var(--a)}#menu .pressed{transform:scale(.9)}
-  </style></head><body tabindex="0">
-  <div id="pre"><div id="ver">v4.8</div><div id="wrap"><canvas id="w"></canvas></div></div>
-  <div id="splash"><img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png"></div>
-  <div id="box"><div id="menu"><button id="b0">Stream</button><button id="b1">Info</button><button id="b2">Uhrzeit</button></div><div id="panel"></div></div>
+  <style>
+    :root{--a:#0af}
+    *{margin:0;box-sizing:border-box}
+    html,body{height:100%;overflow:hidden;background:#000;font-family:system-ui}
+    #pre,#wrap,#splash,#box{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+    #pre{flex-direction:column;z-index:30;transition:opacity .1s}
+    #ver{color:#fff;font:600 2.3em system-ui;opacity:0;transition:opacity .1s}
+    #wrap{display:none;opacity:0;transition:opacity .1s}
+    #wrap canvas{width:60vmin;height:60vmin;background:transparent}
+    #splash{display:none;opacity:0;transition:opacity .25s;z-index:0}
+    #splash img{width:100%;height:100%;object-fit:cover}
+    #box{z-index:10;flex-direction:column}
+    #panel{background:rgba(34,34,34,.85);border:4px solid var(--a);border-radius:16px;padding:1.8em 3em;min-width:50vw;color:#fff;text-align:center}
+    #menu{position:absolute;top:1em;left:50%;transform:translateX(-50%);display:flex;gap:.6em;background:rgba(0,0,0,.6);padding:.6em 1em;border-radius:10px;z-index:20}
+    #menu button{background:#fff;border:none;border-radius:8px;padding:.5em 1.2em;font-size:1em}
+    #menu .sel{outline:3px solid var(--a)}
+    #menu .pressed{transform:scale(.9)}
+  </style>
+</head>
+<body tabindex="0">
+  <!-- Intro‑Layer -->
+  <div id="pre">
+    <div id="ver">v4.8</div>
+    <div id="wrap"><canvas id="w"></canvas></div>
+  </div>
+
+  <!-- Fallback‑Splash -->
+  <div id="splash">
+    <img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Splash">
+  </div>
+
+  <!-- Menü + Infopanel -->
+  <div id="box">
+    <div id="menu">
+      <button id="b0">Stream</button>
+      <button id="b1">Info</button>
+      <button id="b2">Uhrzeit</button>
+    </div>
+    <div id="panel"></div>
+  </div>
+
   <script>
-  const Q=q=>document.querySelector(q),S=t=>new Promise(r=>setTimeout(r,t)),
-  FI=async e=>{e.style.display='flex';e.style.opacity=0;await S(10);e.style.opacity=1;await S(100)},
-  FO=async e=>{e.style.opacity=0;await S(100);e.style.display='none'};
-  const ver=Q('#ver'),pre=Q('#pre'),wrap=Q('#wrap'),cv=Q('#w'),cx=cv.getContext('2d'),sph=Q('#splash'),pan=Q('#panel'),
-  btn=[...Q('#menu').children];let sel=0,tm=0;pan.innerHTML="<h1>Hi Linda 🎵</h1><p>Liebe Grüße</p>";
-  /* Rad */
-  const N=12,P=15,h=[];function setSize(){cv.width=cv.clientWidth;cv.height=cv.clientHeight;
-   const r=Math.min(cv.width,cv.height)*.3,cx=cv.width/2,cy=cv.height/2;h.length=0;
-   for(let i=0;i<N;i++){const t=i/N*6.28,rr=r*.18,x=cx+Math.cos(t)*r*.6,y=cy+Math.sin(t)*r*.6;h.push([x,y,rr])}}
-  let ang=0,last=0,on=0;function draw(t){if(!on)return;last||(last=t);ang+=(t-last)/1e3*6.28/P;ang%=6.28;last=t;
-   cx.clearRect(0,0,cv.width,cv.height);const r=Math.min(cv.width,cv.height)*.3,cx0=cv.width/2,cy0=cv.height/2;
-   cx.save();cx.translate(cx0,cy0);cx.rotate(ang);cx.translate(-cx0,-cy0);
-   cx.beginPath();cx.arc(cx0,cy0,r,0,7);cx.fillStyle="#27c";cx.fill();cx.lineWidth=r*.05;cx.strokeStyle="#159";cx.stroke();
-   cx.fillStyle="#137";h.forEach(a=>{cx.beginPath();cx.arc(...a,0,7);cx.fill()});cx.restore();requestAnimationFrame(draw)}
-  /* UI */
-  function selBtn(i){btn[sel].classList.remove('sel');sel=(i+3)%3;btn[sel].classList.add('sel')}
-  function press(b){b.classList.add('pressed');setTimeout(()=>b.classList.remove('pressed'),150)}
-  btn[0].onclick=()=>{press(btn[0]);sph.style.display='none';document.getElementById("box").style.display = "none";bus.send({type:'start'})};
-  btn[1].onclick=()=>{press(btn[1]);pan.innerHTML="<h1>Hi Linda 🎵</h1><p>Liebe Grüße</p>";clearInterval(tm)};
-  btn[2].onclick=()=>{press(btn[2]);tick();clearInterval(tm);tm=setInterval(tick,1e3)};
-  function tick(){const d=new Date();pan.innerHTML=`<h1>${d.toLocaleTimeString()}</h1><p>${d.toLocaleDateString()}</p>`}
-  window.onkeydown=e=>{/Left|Up/.test(e.key)&&selBtn(sel-1);/Right|Down/.test(e.key)&&selBtn(sel+1);/Enter|OK/.test(e.key)&&btn[sel].click()};
-  window.onresize=setSize;
-  /* Intro */
-  window.onload=async()=>{document.body.focus();selBtn(1);
-   await FI(ver);await S(900);await FO(ver);await S(200);
-   wrap.style.display='flex';setSize();on=1;requestAnimationFrame(draw);
-   await FI(wrap);await S(1000);await FO(wrap);on=0;pre.remove();
-   await FI(sph)};
-  /* Cast */
-  const ctx=cast.framework.CastReceiverContext.getInstance();
-  ctx.getPlayerManager().setPlaybackConfig({autoResumeNumberOfSegments:1});ctx.start();
-  const bus=ctx.getCastMessageBus("urn:x-cast:com.example.stream");
-  </script></body></html>
-  
+  /* ‑‑ Hilfsfunktionen ‑‑ */
+  const Q = q => document.querySelector(q),
+        S = t => new Promise(r => setTimeout(r, t)),
+        FI = async e => { e.style.display='flex'; e.style.opacity=0; await S(10); e.style.opacity=1; await S(100); },
+        FO = async e => { e.style.opacity=0; await S(100); e.style.display='none'; };
+
+  const ver = Q('#ver'),
+        pre = Q('#pre'),
+        wrap = Q('#wrap'),
+        cv = Q('#w'),
+        cx = cv.getContext('2d'),
+        sph = Q('#splash'),
+        pan = Q('#panel'),
+        btn = [...Q('#menu').children];
+
+  /* Panel‑Grüße */
+  pan.innerHTML = "<h1>Hi Linda 🎵</h1><p>Liebe Grüße</p>";
+
+  /* ‑‑ Spinner‑Rad (Intro) ‑‑ */
+  const N = 12, P = 15, h = [];
+  function setSize(){
+    cv.width = cv.clientWidth;
+    cv.height = cv.clientHeight;
+    const r = Math.min(cv.width, cv.height) * .3,
+          cx0 = cv.width / 2,
+          cy0 = cv.height / 2;
+    h.length = 0;
+    for(let i=0;i<N;i++){
+      const t=i/N*6.283185,
+            rr=r*.18,
+            x=cx0+Math.cos(t)*r*.6,
+            y=cy0+Math.sin(t)*r*.6;
+      h.push([x,y,rr]);
+    }
+  }
+  let ang = 0, last = 0, on = 0;
+  function draw(t){
+    if(!on) return;
+    if(!last) last = t;
+    ang += (t - last) / 1000 * 6.283185 / P;
+    ang %= 6.283185;
+    last = t;
+    cx.clearRect(0,0,cv.width,cv.height);
+    const r = Math.min(cv.width, cv.height) * .3,
+          cx0 = cv.width / 2,
+          cy0 = cv.height / 2;
+    cx.save();
+    cx.translate(cx0,cy0);
+    cx.rotate(ang);
+    cx.translate(-cx0,-cy0);
+    /* Kreis */
+    cx.beginPath();
+    cx.arc(cx0,cy0,r,0,7);
+    cx.fillStyle="#27c";
+    cx.fill();
+    cx.lineWidth = r * .05;
+    cx.strokeStyle="#159";
+    cx.stroke();
+    /* Punkte */
+    cx.fillStyle="#137";
+    h.forEach(a=>{cx.beginPath();cx.arc(...a,0,7);cx.fill();});
+    cx.restore();
+    requestAnimationFrame(draw);
+  }
+
+  /* ‑‑ Menüsteuerung ‑‑ */
+  let sel = 0, tm = 0;
+  function selBtn(i){
+    btn[sel].classList.remove('sel');
+    sel = (i + 3) % 3;
+    btn[sel].classList.add('sel');
+  }
+  function press(b){
+    b.classList.add('pressed');
+    setTimeout(()=>b.classList.remove('pressed'),150);
+  }
+  function tick(){
+    const d = new Date();
+    pan.innerHTML = `<h1>${d.toLocaleTimeString()}</h1><p>${d.toLocaleDateString()}</p>`;
+  }
+
+  /* ‑‑ Google Cast ‑‑ */
+  const NS = "urn:x-cast:com.example.stream";
+  const ctx = cast.framework.CastReceiverContext.getInstance();
+  ctx.getPlayerManager().setPlaybackConfig({ autoResumeNumberOfSegments: 1 });
+  ctx.start();
+  const bus = ctx.getCastMessageBus(NS);
+
+  /* Buttons */
+  btn[0].onclick = () => {
+    press(btn[0]);
+    /* UI ausblenden */
+    sph.style.display = 'none';
+    document.getElementById('box').style.display = 'none';
+    /* Nachricht an Sender schicken */
+    bus.broadcast(JSON.stringify({ type: 'start' }));
+  };
+  btn[1].onclick = () => {
+    press(btn[1]);
+    pan.innerHTML = "<h1>Hi Linda 🎵</h1><p>Liebe Grüße</p>";
+    clearInterval(tm);
+  };
+  btn[2].onclick = () => {
+    press(btn[2]);
+    tick();
+    clearInterval(tm);
+    tm = setInterval(tick, 1000);
+  };
+
+  /* Remote‑Fernbedienung (Tastatur) */
+  window.onkeydown = e => {
+    /Left|Up/.test(e.key)   && selBtn(sel - 1);
+    /Right|Down/.test(e.key)&& selBtn(sel + 1);
+    /Enter|OK/.test(e.key)  && btn[sel].click();
+  };
+  window.onresize = setSize;
+
+  /* ‑‑ Intro‑Sequenz beim Laden ‑‑ */
+  window.onload = async () => {
+    document.body.focus();
+    selBtn(1);               // "Info" vorausgewählt
+
+    await FI(ver);           // Version einblenden
+    await S(900);
+    await FO(ver);
+    await S(200);
+
+    wrap.style.display = 'flex';
+    setSize();
+    on = 1;                  // Spinner aktiv
+    requestAnimationFrame(draw);
+    await FI(wrap);
+    await S(1000);
+    await FO(wrap);
+    on = 0;
+    pre.remove();            // Intro‑Layer entfernen
+
+    await FI(sph);           // Splash einsetzen
+  };
+  </script>
+</body>
+</html>
