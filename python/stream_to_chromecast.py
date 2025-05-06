@@ -1,152 +1,283 @@
 #!/usr/bin/env python3
-import os, sys, time, socket, signal, subprocess, threading
+import os
+import sys
+import time
+import socket
+import signal
+import subprocess
+
 import pychromecast
+from pychromecast.error import UnsupportedNamespace
 from pychromecast.controllers import BaseController
 
-# ── Einstellungen ────────────────────────────────────────────────
-PORT, FPS = 8090, 30
-GOP       = FPS * 2
-RES       = "1920x1080"
-DISPLAY   = os.getenv("DISPLAY", ":0")
-NULL_SINK = "cast_sink"
-APP_ID    = "22B2DA66"
-NS        = "urn:x-cast:com.example.stream"
-# ─────────────────────────────────────────────────────────────────
+# ————— CONFIGURATION —————
+PORT                   = 8090
+FPS                    = 30
+MOVIE_GOP              = FPS * 2      # keyframe every 2s
+RESOLUTION             = "1920x1080"
+DISPLAY                = os.environ.get("DISPLAY", ":0")
+NULL_SINK_NAME         = "cast_sink"
+CUSTOM_RECEIVER_APP_ID = "22B2DA66"   # ← your Custom Receiver App ID here
+STREAM_NS              = "urn:x-cast:com.example.stream"
+# ————————————————————————
 
-ffmpeg_proc = pa_idx = None
-orig_sink   = None
+ffmpeg_proc   = None
+pa_module_idx = None
+original_sink = None
+cast          = None
+mc            = None
+stream_url    = None
 
-# ── Aufräumen ────────────────────────────────────────────────────
-def cleanup(*_):
+
+def cleanup(signum=None, frame=None):
+    print("\n🛑 Shutting down gracefully…")
+    global mc, cast, ffmpeg_proc, original_sink, pa_module_idx
+
+    if mc:
+        try:
+            print("⏹️  Stopping Chromecast playback...")
+            mc.stop()
+        except Exception as e:
+            print(f"⚠️  Error stopping media: {e}")
+
+    if cast:
+        try:
+            print("🚪 Quitting custom receiver app...")
+            cast.quit_app()
+        except Exception as e:
+            print(f"⚠️  Error quitting app: {e}")
+
     if ffmpeg_proc and ffmpeg_proc.poll() is None:
+        print("🔌 Terminating FFmpeg server...")
         ffmpeg_proc.terminate()
-    if orig_sink:
-        subprocess.run(["pactl", "set-default-sink", orig_sink],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    if pa_idx:
-        subprocess.run(["pactl", "unload-module", pa_idx],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            ffmpeg_proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            ffmpeg_proc.kill()
+
+    if original_sink:
+        print("🔊 Restoring PulseAudio default sink...")
+        subprocess.run(
+            ["pactl", "set-default-sink", original_sink],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+    if pa_module_idx:
+        print("🔌 Unloading null sink module...")
+        subprocess.run(
+            ["pactl", "unload-module", pa_module_idx],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+
+    print("✅ Cleanup complete. Goodbye!")
     sys.exit(0)
-for sig in (signal.SIGINT, signal.SIGTERM):
-    signal.signal(sig, cleanup)
 
-# ── PulseAudio‑Null‑Sink ─────────────────────────────────────────
-def default_sink():
-    out = subprocess.run(["pactl", "info"], text=True,
-                         stdout=subprocess.PIPE).stdout
-    for l in out.splitlines():
-        if l.startswith("Default Sink:"):
-            return l.split(":", 1)[1].strip()
-    return None
 
-def create_null_sink():
-    global pa_idx, orig_sink
-    orig_sink = default_sink()
-    pa_idx = subprocess.run(
-        ["pactl", "load-module", "module-null-sink",
-         f"sink_name={NULL_SINK}",
-         "sink_properties=device.description=ChromecastSink"],
-        text=True, stdout=subprocess.PIPE).stdout.strip()
-    subprocess.run(["pactl", "set-default-sink", NULL_SINK])
-    return f"{NULL_SINK}.monitor"
+signal.signal(signal.SIGINT, cleanup)
+signal.signal(signal.SIGTERM, cleanup)
 
-# ── HW‑Accel‑Erkennung ───────────────────────────────────────────
-def hw_accel():
+
+# ————— Custom namespace controller —————
+class StreamController(BaseController):
+    def __init__(self):
+        super().__init__(STREAM_NS)
+
+    def receive_message(self, message, data):
+        # Always print raw incoming message & data for debugging
+        print(f"[RECEIVED on {STREAM_NS}] message={message}")
+        print(f"[RECEIVED on {STREAM_NS}] data={data}")
+        sys.stdout.flush()
+
+        # Handle debug messages from the receiver
+        if data.get("type") == "debug":
+            print(f"[RECEIVER DEBUG] {data.get('msg')}")
+        # Handle the “start” command
+        elif data.get("type") == "start":
+            print("▶️  Remote requested stream—starting playback!")
+            mc.play_media(stream_url, "video/mp4")
+            mc.block_until_active(timeout=10)
+            print("🔴 Now streaming… Ctrl+C to stop.")
+        else:
+            print(f"[RECEIVER] Unhandled message type: {data.get('type')}")
+        sys.stdout.flush()
+        return True  # signal that we handled the message
+
+
+# ————— Hardware detection, PulseAudio setup, FFmpeg builder —————
+
+def detect_hardware_info():
+    cpu_model = None
     try:
-        acc = set(subprocess.run(["ffmpeg", "-hwaccels"],
-                                 text=True, stdout=subprocess.PIPE).stdout.split()[2:])
+        with open('/proc/cpuinfo') as f:
+            for line in f:
+                if line.startswith('model name'):
+                    cpu_model = line.split(':',1)[1].strip()
+                    break
+    except Exception:
+        pass
+
+    gpu_info = []
+    try:
+        out = subprocess.run(
+            ['lspci'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, check=True
+        ).stdout
+        for line in out.splitlines():
+            if 'VGA' in line or '3D controller' in line:
+                gpu_info.append(line.strip())
+    except Exception:
+        pass
+
+    return cpu_model, gpu_info
+
+
+def detect_hwaccel():
+    try:
+        out = subprocess.run(
+            ["ffmpeg", "-hwaccels"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, check=True
+        ).stdout
+        methods = {l.strip() for l in out.splitlines()[1:] if l.strip()}
     except Exception:
         return None
-    if "vaapi" in acc and os.path.exists("/dev/dri/renderD128"):
+
+    if "vaapi" in methods and os.path.exists("/dev/dri/renderD128"):
         return "vaapi"
-    if any(x in acc for x in ("cuda", "nvenc")):
+    if any(m in methods for m in ("cuda", "nvenc")):
         return "cuda"
-    if "qsv" in acc:
+    if "qsv" in methods:
         return "qsv"
     return None
 
-# ── FFmpeg‑Aufruf bauen ─────────────────────────────────────────
-def ffmpeg_cmd(audio, hw):
-    c = ["ffmpeg", "-hide_banner", "-loglevel", "error",
-         "-f", "x11grab", "-framerate", str(FPS), "-video_size", RES, "-i", DISPLAY,
-         "-f", "pulse", "-i", audio]
-    if hw == "vaapi":
-        c += ["-vaapi_device", "/dev/dri/renderD128",
-              "-vf", "format=nv12,hwupload", "-c:v", "h264_vaapi", "-qp", "24"]
-    elif hw == "cuda":
-        c += ["-c:v", "h264_nvenc", "-preset", "p1", "-cq", "23"]
-    elif hw == "qsv":
-        c += ["-c:v", "h264_qsv", "-global_quality", "24"]
+
+def get_default_sink():
+    out = subprocess.run(
+        ["pactl", "info"],
+        stdout=subprocess.PIPE, text=True, check=True
+    ).stdout
+    for line in out.splitlines():
+        if line.startswith("Default Sink:"):
+            return line.split(":",1)[1].strip()
+    return None
+
+
+def setup_null_sink():
+    global pa_module_idx, original_sink
+    original_sink = get_default_sink()
+    res = subprocess.run([
+        "pactl", "load-module", "module-null-sink",
+        f"sink_name={NULL_SINK_NAME}",
+        "sink_properties=device.description=ChromecastSink"
+    ], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+       text=True, check=True)
+    pa_module_idx = res.stdout.strip()
+    subprocess.run(
+        ["pactl", "set-default-sink", NULL_SINK_NAME],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True
+    )
+    return f"{NULL_SINK_NAME}.monitor"
+
+
+def build_ffmpeg_cmd(audio_src, hwaccel):
+    cmd = [
+        "ffmpeg", "-hide_banner", "-loglevel", "info",
+        "-re", "-thread_queue_size", "512",
+        "-f", "x11grab", "-framerate", str(FPS),
+        "-video_size", RESOLUTION, "-i", DISPLAY,
+        "-thread_queue_size", "512",
+        "-f", "pulse", "-i", audio_src,
+    ]
+    if hwaccel == "vaapi":
+        cmd += [
+            "-vaapi_device", "/dev/dri/renderD128",
+            "-vf", "format=nv12,hwupload",
+            "-c:v", "h264_vaapi", "-qp", "24",
+        ]
+    elif hwaccel == "cuda":
+        cmd += ["-c:v", "h264_nvenc", "-preset", "p1", "-cq", "23"]
+    elif hwaccel == "qsv":
+        cmd += ["-c:v", "h264_qsv", "-global_quality", "24"]
     else:
-        c += ["-c:v", "libx264", "-preset", "veryfast",
-              "-crf", "18", "-pix_fmt", "yuv420p"]
-    c += ["-g", str(GOP), "-keyint_min", str(GOP),
-          "-c:a", "aac", "-b:a", "192k",
-          "-movflags", "frag_keyframe+empty_moov+default_base_moof",
-          "-f", "mp4", "-listen", "1", f"http://0.0.0.0:{PORT}/"]
-    return c
+        cmd += [
+            "-c:v", "libx264", "-preset", "veryfast",
+            "-tune", "film", "-crf", "18", "-pix_fmt", "yuv420p"
+        ]
+    cmd += [
+        "-g", str(MOVIE_GOP), "-keyint_min", str(MOVIE_GOP),
+        "-c:a", "aac", "-b:a", "192k",
+        "-f", "mp4",
+        "-movflags", "frag_keyframe+empty_moov+default_base_moof",
+        "-listen", "1", f"http://0.0.0.0:{PORT}/"
+    ]
+    return cmd
 
-# ── Custom‑Controller zum Warten auf „start“ ─────────────────────
-class StreamController(BaseController):
-    def __init__(self):
-        super().__init__(NS)
-        self.start_event = threading.Event()
 
-    # wird aufgerufen, wenn der Receiver eine Nachricht schickt
-    def receive_message(self, _message, data):
-        try:
-            if isinstance(data, str):
-                import json
-                data = json.loads(data)
-        except Exception:
-            return False
-        if isinstance(data, dict) and data.get("type") == "start":
-            print("📺  'start' erhalten – starte FFmpeg …")
-            self.start_event.set()
-            return True
-        return False
-
-# ── Hauptlogik ───────────────────────────────────────────────────
 def main():
-    global ffmpeg_proc
+    global ffmpeg_proc, cast, mc, stream_url
 
-    # Chromecast finden
-    cc, _ = pychromecast.get_chromecasts()
-    if not cc:
-        print("Kein Chromecast gefunden")
+    cpu, gpus = detect_hardware_info()
+    print(f"🔧 CPU: {cpu or 'Unknown'}")
+    print("🖥️  GPU(s):")
+    for g in gpus or ["None detected"]:
+        print("   -", g)
+
+    print("🔊 Setting up audio capture…")
+    audio_src = setup_null_sink()
+    print(f"⤷ Capturing from: {audio_src}")
+
+    subprocess.run(
+        ["pkill", "-f", f"ffmpeg.*-listen.*{PORT}"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+
+    hw = detect_hwaccel()
+    print(f"⚙️  Hardware acceleration: {hw or 'none (software)'}")
+    ffmpeg_cmd = build_ffmpeg_cmd(audio_src, hw)
+
+    print("▶️ Starting FFmpeg server…")
+    ffmpeg_proc = subprocess.Popen(ffmpeg_cmd)
+    time.sleep(1)
+
+    print("🔍 Discovering Chromecast…")
+    chromecasts, _ = pychromecast.get_chromecasts()
+    if not chromecasts:
+        print("⚠️ No Chromecast found. Exiting.")
         cleanup()
-    cast = cc[0]
+    cast = chromecasts[0]
     cast.wait()
 
-    # Receiver starten
-    cast.start_app(APP_ID)
-    print("🔔  Receiver läuft – warte auf 'Stream'‑Klick …")
+    host = getattr(cast, "host", None) or cast.socket_client.host
+    port = getattr(cast, "port", None) or cast.socket_client.port
+    print(f"✅ Found Chromecast: {cast.device.friendly_name} @ {host}:{port}")
 
-    # Controller registrieren + auf start warten
-    sc = StreamController()
-    cast.register_handler(sc)
-    sc.start_event.wait()        # → Blockiert bis Button gedrückt
+    if CUSTOM_RECEIVER_APP_ID:
+        print(f"🚀 Launching custom receiver ({CUSTOM_RECEIVER_APP_ID})…")
+        try:
+            cast.start_app(CUSTOM_RECEIVER_APP_ID)
+            time.sleep(5)
+        except Exception as e:
+            print(f"⚠️  Error launching custom receiver: {e}")
 
-    # Jetzt erst FFmpeg und PulseAudio‑Sink aufsetzen
-    audio = create_null_sink()
-    hw    = hw_accel()
-    print("HW‑Accel:", hw or "Software")
-    ffmpeg_proc = subprocess.Popen(ffmpeg_cmd(audio, hw))
+    controller = StreamController()
+    cast.register_handler(controller)
 
-    # Local IP für Chromecast ermitteln
-    host, port = cast.socket_client.host, cast.socket_client.port
+    mc = cast.media_controller
+    try:
+        mc.update_status()
+    except UnsupportedNamespace:
+        pass
+
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.connect((host, port))
-    url = f"http://{s.getsockname()[0]}:{PORT}/"
+    local_ip = s.getsockname()[0]
     s.close()
+    stream_url = f"http://{local_ip}:{PORT}/"
+    print(f"\n📺 Stream ready at {stream_url}")
+    print("⏸️  Waiting for you to press ‘Stream’ on the TV remote menu…")
 
-    # Medienwiedergabe anschieben
-    cast.media_controller.play_media(url, "video/mp4")
-    print("▶️  Streaming …  Ctrl+C beendet")
-
-    # Idle‑Loop
     while True:
         time.sleep(1)
+
 
 if __name__ == "__main__":
     main()

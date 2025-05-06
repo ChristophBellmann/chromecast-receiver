@@ -1,191 +1,91 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>Cast v4.8</title>
-  <!-- Google Cast CAF Receiver SDK -->
-  <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
-  <style>
-    :root{--a:#0af}
-    *{margin:0;box-sizing:border-box}
-    html,body{height:100%;overflow:hidden;background:#000;font-family:system-ui}
-    #pre,#wrap,#splash,#box{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
-    #pre{flex-direction:column;z-index:30;transition:opacity .1s}
-    #ver{color:#fff;font:600 2.3em system-ui;opacity:0;transition:opacity .1s}
-    #wrap{display:none;opacity:0;transition:opacity .1s}
-    #wrap canvas{width:60vmin;height:60vmin;background:transparent}
-    #splash{display:none;opacity:0;transition:opacity .25s;z-index:0}
-    #splash img{width:100%;height:100%;object-fit:cover}
-    #box{z-index:10;flex-direction:column}
-    #panel{background:rgba(34,34,34,.85);border:4px solid var(--a);border-radius:16px;padding:1.8em 3em;min-width:50vw;color:#fff;text-align:center}
-    #menu{position:absolute;top:1em;left:50%;transform:translateX(-50%);display:flex;gap:.6em;background:rgba(0,0,0,.6);padding:.6em 1em;border-radius:10px;z-index:20}
-    #menu button{background:#fff;border:none;border-radius:8px;padding:.5em 1.2em;font-size:1em}
-    #menu .sel{outline:3px solid var(--a)}
-    #menu .pressed{transform:scale(.9)}
-  </style>
+<meta charset="utf-8"/>
+<title>Custom Receiver v3.3</title>
+<script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+<script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework_controls_dpad_tv.js"></script>
+<style>
+:root{--accent:#0af}
+html,body{margin:0;height:100%;background:#000;font-family:system-ui,sans-serif;overflow:hidden}
+#pre{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:30;background:#000;opacity:1;transition:opacity .1s}
+#ver{display:none;color:#fff;font-size:2.3em;font-weight:600;opacity:0;transition:opacity .1s}
+#wWrap{display:none;opacity:0;transition:opacity .1s}
+#wWrap canvas{width:60vmin;height:60vmin}
+#splash{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:5;opacity:0;transition:opacity .2s}
+#splash img{max-width:80%}
+#aboutBox{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:10;text-align:center;pointer-events:none}
+#aboutPanel{background:rgba(34,34,34,.85);border:4px solid var(--accent);border-radius:16px;padding:2em 3em;color:#fff;min-width:50vw;box-shadow:0 0 18px #000}
+#aboutPanel h1{margin:0 0 .4em;font-size:1.7em}
+#aboutPanel p{margin:0;font-size:1.15em}
+#menu{position:absolute;top:1em;left:50%;transform:translateX(-50%);display:flex;gap:.7em;background:rgba(0,0,0,.65);padding:.7em 1.1em;border-radius:10px;z-index:20}
+#menu button{background:#fff;border:none;padding:.55em 1.4em;border-radius:8px;font-size:1em;transition:background .15s,transform .15s}
+#menu button.sel{outline:3px solid var(--accent)}
+#menu button.pressed{transform:scale(.9)}
+cast-media-player{display:none}
+</style>
 </head>
 <body tabindex="0">
-  <!-- Intro‑Layer -->
-  <div id="pre">
-    <div id="ver">v4.8</div>
-    <div id="wrap"><canvas id="w"></canvas></div>
-  </div>
+<!-- Intro -->
+<div id="pre"><div id="ver">v3.3</div><div id="wWrap"><canvas id="wheel"></canvas></div></div>
 
-  <!-- Fallback‑Splash -->
-  <div id="splash">
-    <img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Splash">
-  </div>
+<!-- Splash‑Hintergrund -->
+<div id="splash">
+  <img src="https://christophbellmann.github.io/my-cast-receiver/splash-0.1.png" alt="Splash"/>
+</div>
 
-  <!-- Menü + Infopanel -->
-  <div id="box">
-    <div id="menu">
-      <button id="b0">Stream</button>
-      <button id="b1">Info</button>
-      <button id="b2">Uhrzeit</button>
-    </div>
-    <div id="panel"></div>
-  </div>
+<!-- Info‑/Uhr‑Textfeld -->
+<div id="aboutBox"><div id="aboutPanel">
+  <h1>Hi&nbsp;Linda – selbstgebauter Player 🎵</h1><p>Liebe Grüße, Christoph</p>
+</div></div>
 
-  <script>
-  /* ‑‑ Hilfsfunktionen ‑‑ */
-  const Q = q => document.querySelector(q),
-        S = t => new Promise(r => setTimeout(r, t)),
-        FI = async e => { e.style.display='flex'; e.style.opacity=0; await S(10); e.style.opacity=1; await S(100); },
-        FO = async e => { e.style.opacity=0; await S(100); e.style.display='none'; };
+<!-- Menü -->
+<div id="menu">
+  <button id="btn-stream">Stream</button>
+  <button id="btn-info">Info</button>
+  <button id="btn-time">Uhrzeit</button>
+</div>
 
-  const ver = Q('#ver'),
-        pre = Q('#pre'),
-        wrap = Q('#wrap'),
-        cv = Q('#w'),
-        cx = cv.getContext('2d'),
-        sph = Q('#splash'),
-        pan = Q('#panel'),
-        btn = [...Q('#menu').children];
+<script>
+(()=>{const sleep=t=>new Promise(r=>setTimeout(r,t)),
+fadeIn=async(e,d=100)=>{e.style.display='block';e.style.opacity=0;await sleep(10);e.style.opacity=1;await sleep(d)},
+fadeOut=async(e,d=100)=>{e.style.opacity=1;await sleep(10);e.style.opacity=0;await sleep(d);e.style.display='none'};
 
-  /* Panel‑Grüße */
-  pan.innerHTML = "<h1>Hi Linda 🎵</h1><p>Liebe Grüße</p>";
+const pre=$('#pre'),ver=$('#ver'),wWrap=$('#wWrap'),wheel=$('#wheel'),wCtx=wheel.getContext('2d'),
+ROT=15,HOL=12,holes=[],splash=$('#splash'),about=$('#aboutPanel');
 
-  /* ‑‑ Spinner‑Rad (Intro) ‑‑ */
-  const N = 12, P = 15, h = [];
-  function setSize(){
-    cv.width = cv.clientWidth;
-    cv.height = cv.clientHeight;
-    const r = Math.min(cv.width, cv.height) * .3,
-          cx0 = cv.width / 2,
-          cy0 = cv.height / 2;
-    h.length = 0;
-    for(let i=0;i<N;i++){
-      const t=i/N*6.283185,
-            rr=r*.18,
-            x=cx0+Math.cos(t)*r*.6,
-            y=cy0+Math.sin(t)*r*.6;
-      h.push([x,y,rr]);
-    }
-  }
-  let ang = 0, last = 0, on = 0;
-  function draw(t){
-    if(!on) return;
-    if(!last) last = t;
-    ang += (t - last) / 1000 * 6.283185 / P;
-    ang %= 6.283185;
-    last = t;
-    cx.clearRect(0,0,cv.width,cv.height);
-    const r = Math.min(cv.width, cv.height) * .3,
-          cx0 = cv.width / 2,
-          cy0 = cv.height / 2;
-    cx.save();
-    cx.translate(cx0,cy0);
-    cx.rotate(ang);
-    cx.translate(-cx0,-cy0);
-    /* Kreis */
-    cx.beginPath();
-    cx.arc(cx0,cy0,r,0,7);
-    cx.fillStyle="#27c";
-    cx.fill();
-    cx.lineWidth = r * .05;
-    cx.strokeStyle="#159";
-    cx.stroke();
-    /* Punkte */
-    cx.fillStyle="#137";
-    h.forEach(a=>{cx.beginPath();cx.arc(...a,0,7);cx.fill();});
-    cx.restore();
-    requestAnimationFrame(draw);
-  }
+function $(s){return document.querySelector(s)}
+const resizeWheel=()=>{wheel.width=wheel.clientWidth;wheel.height=wheel.clientHeight;const w=wheel.width,h=wheel.height,r=Math.min(w,h)*.3,cx=w/2,cy=h/2;holes.length=0;
+  for(let i=0;i<HOL;i++){const t=i/HOL*2*Math.PI,hr=r*(.15+.05*Math.random()),hx=cx+Math.cos(t)*r*.6*(.8+.2*Math.random()),hy=cy+Math.sin(t)*r*.6*(.8+.2*Math.random());holes.push({hx,hy,hr})}}
+let last=null,ang=0;function drawWheel(ts){if(!drawWheel.on)return;last=last??ts;ang+=(ts-last)/1000*2*Math.PI/ROT;ang%=2*Math.PI;last=ts;
+ const w=wheel.width,h=wheel.height,r=Math.min(w,h)*.3,cx=w/2,cy=h/2;wCtx.clearRect(0,0,w,h);
+ wCtx.save();wCtx.translate(cx,cy);wCtx.rotate(ang);wCtx.translate(-cx,-cy);
+ wCtx.beginPath();wCtx.arc(cx,cy,r,0,2*Math.PI);wCtx.fillStyle='#2277cc';wCtx.fill();wCtx.lineWidth=r*.05;wCtx.strokeStyle='#1155aa';wCtx.stroke();
+ wCtx.fillStyle='#114477';holes.forEach(o=>{wCtx.beginPath();wCtx.arc(o.hx,o.hy,o.hr,0,2*Math.PI);wCtx.fill()});wCtx.restore();
+ requestAnimationFrame(drawWheel)}
+function startWheel(){resizeWheel();drawWheel.on=true;requestAnimationFrame(drawWheel)}
+function stopWheel(){drawWheel.on=false}
 
-  /* ‑‑ Menüsteuerung ‑‑ */
-  let sel = 0, tm = 0;
-  function selBtn(i){
-    btn[sel].classList.remove('sel');
-    sel = (i + 3) % 3;
-    btn[sel].classList.add('sel');
-  }
-  function press(b){
-    b.classList.add('pressed');
-    setTimeout(()=>b.classList.remove('pressed'),150);
-  }
-  function tick(){
-    const d = new Date();
-    pan.innerHTML = `<h1>${d.toLocaleTimeString()}</h1><p>${d.toLocaleDateString()}</p>`;
-  }
+async function intro(){await fadeIn(ver,100);await sleep(1000);await fadeOut(ver,100);await sleep(200);
+ wWrap.style.display='block';startWheel();await fadeIn(wWrap,100);await sleep(1000);await fadeOut(wWrap,100);stopWheel();await sleep(200);
+ await fadeOut(pre,100);await fadeIn(splash,200)}intro();window.addEventListener('resize',resizeWheel);
 
-  /* ‑‑ Google Cast ‑‑ */
-  const NS = "urn:x-cast:com.example.stream";
-  const ctx = cast.framework.CastReceiverContext.getInstance();
-  ctx.getPlayerManager().setPlaybackConfig({ autoResumeNumberOfSegments: 1 });
-  ctx.start();
-  const bus = ctx.getCastMessageBus(NS);
+const ctx=cast.framework.CastReceiverContext.getInstance(),mgr=ctx.getPlayerManager();
+mgr.setPlaybackConfig({autoResumeNumberOfSegments:1});ctx.start();const bus=ctx.getCastMessageBus('urn:x-cast:com.example.stream');
 
-  /* Buttons */
-  btn[0].onclick = () => {
-    press(btn[0]);
-    /* UI ausblenden */
-    sph.style.display = 'none';
-    document.getElementById('box').style.display = 'none';
-    /* Nachricht an Sender schicken */
-    bus.broadcast(JSON.stringify({ type: 'start' }));
-  };
-  btn[1].onclick = () => {
-    press(btn[1]);
-    pan.innerHTML = "<h1>Hi Linda 🎵</h1><p>Liebe Grüße</p>";
-    clearInterval(tm);
-  };
-  btn[2].onclick = () => {
-    press(btn[2]);
-    tick();
-    clearInterval(tm);
-    tm = setInterval(tick, 1000);
-  };
+const btns=[$('#btn-stream'),$('#btn-info'),$('#btn-time')];let sel=0,timer=null;
+function selBtn(i){btns.forEach(b=>b.classList.remove('sel'));sel=(i+btns.length)%btns.length;btns[sel].classList.add('sel');btns[sel].focus()}
+function press(b){b.classList.add('pressed');setTimeout(()=>b.classList.remove('pressed'),150)}
+btns[0].onclick=()=>{press(btns[0]);splash.style.display='none';about.parentNode.style.display='none';bus.send({type:'start'})};
+btns[1].onclick=()=>{press(btns[1]);clearInterval(timer);about.innerHTML='<h1>Hi&nbsp;Linda – selbstgebauter Player 🎵</h1><p>Liebe Grüße, Christoph</p>'};
+btns[2].onclick=()=>{press(btns[2]);updateTime();clearInterval(timer);timer=setInterval(updateTime,1000)};
+function updateTime(){const d=new Date();about.innerHTML=`<h1>${d.toLocaleTimeString()}</h1><p>${d.toLocaleDateString()}</p>`}
 
-  /* Remote‑Fernbedienung (Tastatur) */
-  window.onkeydown = e => {
-    /Left|Up/.test(e.key)   && selBtn(sel - 1);
-    /Right|Down/.test(e.key)&& selBtn(sel + 1);
-    /Enter|OK/.test(e.key)  && btn[sel].click();
-  };
-  window.onresize = setSize;
-
-  /* ‑‑ Intro‑Sequenz beim Laden ‑‑ */
-  window.onload = async () => {
-    document.body.focus();
-    selBtn(1);               // "Info" vorausgewählt
-
-    await FI(ver);           // Version einblenden
-    await S(900);
-    await FO(ver);
-    await S(200);
-
-    wrap.style.display = 'flex';
-    setSize();
-    on = 1;                  // Spinner aktiv
-    requestAnimationFrame(draw);
-    await FI(wrap);
-    await S(1000);
-    await FO(wrap);
-    on = 0;
-    pre.remove();            // Intro‑Layer entfernen
-
-    await FI(sph);           // Splash einsetzen
-  };
-  </script>
+window.addEventListener('keydown',e=>{const k=e.key;
+ if(k==='ArrowLeft')selBtn(sel-1);else if(k==='ArrowRight')selBtn(sel+1);
+ else if(k==='Enter'||k==='OK')btns[sel].click();e.preventDefault()});
+window.onload=()=>{document.body.focus();selBtn(0)};
+})();
+</script>
 </body>
 </html>
