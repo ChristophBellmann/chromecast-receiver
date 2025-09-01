@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import os, sys, subprocess, threading, queue, signal, configparser, shutil, re, shlex
+import os, sys, subprocess, threading, queue, signal, configparser, shutil, re, shlex, time
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
@@ -9,13 +9,16 @@ CAST_STREAM = os.path.join(HERE, "cast_stream.py")
 CONFIG_USER = os.path.expanduser("~/.config/chromecast-streamer/config.ini")
 CONFIG_LOCAL = os.path.abspath(os.path.join(HERE, "..", "config.local.ini"))
 
+# ----------------------------- Config IO -----------------------------
 def load_cfg():
     cfg = configparser.ConfigParser()
     cfg.read([CONFIG_USER, CONFIG_LOCAL])
     c = cfg["cast"] if "cast" in cfg else {}
     s = cfg["stream"] if "stream" in cfg else {}
     v = cfg["virtual"] if "virtual" in cfg else {}
+    n = cfg["net"] if "net" in cfg else {}
     getenv_disp = os.environ.get("DISPLAY", ":0")
+
     def geti(sec, key, default=""):
         try:
             return (sec.get(key) if hasattr(sec, "get") else default) or default
@@ -29,6 +32,11 @@ def load_cfg():
     def geti_float(sec, key, default):
         try:
             return float(geti(sec, key, default))
+        except Exception:
+            return default
+    def geti_bool(sec, key, default=False):
+        try:
+            return str(geti(sec, key, str(default))).lower() == "true"
         except Exception:
             return default
 
@@ -46,6 +54,7 @@ def load_cfg():
         "gop":        geti_float(s, "gop_seconds", 2.0),
         "fflog":      geti(s, "fflog", "info"),
         "sink":       geti(s, "sink_name", "cast_sink"),
+        "latency":    geti(s, "latency", "normal"),
         # virtual
         "virt_enabled": geti(v, "enabled", "false").lower() == "true",
         "virt_res":     geti(v, "resolution", "3840x2160"),
@@ -55,6 +64,11 @@ def load_cfg():
         # app launcher
         "app_choice":   geti(v, "app_choice", "none"),
         "app_arg":      geti(v, "app_arg", ""),
+        # net
+        "lan_only":     geti_bool(n, "lan_only", False),
+        "vlc_web_auto": geti_bool(n, "vlc_web_auto", False),
+        "vlc_web_port": geti_int(n, "vlc_web_port", 8080),
+        "vlc_web_pass": geti(n, "vlc_web_pass", "cast"),
     }
 
 def save_cfg(d):
@@ -76,6 +90,7 @@ def save_cfg(d):
         "fflog": d["fflog"],
         "sink_name": d["sink"],
         "mode": d["mode"],
+        "latency": d["latency"],
     }
     cfg["virtual"] = {
         "enabled": str(d["virt_enabled"]),
@@ -86,9 +101,16 @@ def save_cfg(d):
         "app_choice": d["app_choice"],
         "app_arg": d["app_arg"],
     }
+    cfg["net"] = {
+        "lan_only": str(d["lan_only"]),
+        "vlc_web_auto": str(d["vlc_web_auto"]),
+        "vlc_web_port": str(d["vlc_web_port"]),
+        "vlc_web_pass": d["vlc_web_pass"],
+    }
     with open(CONFIG_USER, "w") as f:
         cfg.write(f)
 
+# ----------------------------- Helpers -----------------------------
 def validate_display(disp: str) -> bool:
     if not disp:
         return False
@@ -100,8 +122,7 @@ def validate_display(disp: str) -> bool:
     except Exception:
         return False
 
-def which(cmd):
-    return shutil.which(cmd)
+def which(cmd): return shutil.which(cmd)
 
 def has_flatpak(app_id=None):
     if not which("flatpak"): return False
@@ -121,42 +142,36 @@ def has_snap(app_name):
         return False
 
 def resolve_firefox_cmd():
-    """Return (argv, hint) tuple or (None, hint_if_missing)."""
-    if which("firefox"):
-        return (["firefox"], None)
-    # flatpak
-    if has_flatpak("org.mozilla.firefox"):
-        return (["flatpak","run","org.mozilla.firefox"], None)
-    # snap
-    if has_snap("firefox"):
-        return (["snap","run","firefox"], None)
-    return (None, "Firefox nicht gefunden. Installiere z.B.:\n  sudo apt install firefox  (oder)\n  sudo snap install firefox  (oder)\n  flatpak install flathub org.mozilla.firefox")
+    if which("firefox"): return (["firefox"], None)
+    if has_flatpak("org.mozilla.firefox"): return (["flatpak","run","org.mozilla.firefox"], None)
+    if has_snap("firefox"): return (["snap","run","firefox"], None)
+    return (None, "Firefox nicht gefunden. Installiere z.B.:\n  sudo apt install firefox\n  snap install firefox\n  flatpak install flathub org.mozilla.firefox")
 
 def resolve_vlc_cmd():
-    if which("vlc"):
-        return (["vlc"], None)
-    if has_flatpak("org.videolan.VLC"):
-        return (["flatpak","run","org.videolan.VLC"], None)
-    if has_snap("vlc"):
-        return (["snap","run","vlc"], None)
-    return (None, "VLC nicht gefunden. Installiere z.B.:\n  sudo apt install vlc  (oder)\n  sudo snap install vlc  (oder)\n  flatpak install flathub org.videolan.VLC")
+    if which("vlc"): return (["vlc"], None)
+    if has_flatpak("org.videolan.VLC"): return (["flatpak","run","org.videolan.VLC"], None)
+    if has_snap("vlc"): return (["snap","run","vlc"], None)
+    return (None, "VLC nicht gefunden. Installiere z.B.:\n  sudo apt install vlc\n  snap install vlc\n  flatpak install flathub org.videolan.VLC")
 
+# ----------------------------- GUI -----------------------------
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Chromecast Streamer")
-        self.geometry("900x720")
+        self.geometry("940x760")
         self.proc = None
         self.q = queue.Queue()
         self.runtime_virtual_display = None
+        self._pending_restart = False
+        self._pending_restart_reason = None
         self._build_ui()
-        self.after(100, self._drain)
+        # >>> fehlende Methode war hier aufgerufen:
+        self.after(120, self._drain)
 
+    # ---------- UI ----------
     def _build_ui(self):
         d = load_cfg()
-
-        frm = ttk.Frame(self, padding=10)
-        frm.pack(fill="x")
+        frm = ttk.Frame(self, padding=10); frm.pack(fill="x")
 
         self.mode = tk.StringVar(value=d["mode"])
         self.appid = tk.StringVar(value=d["app_id"])
@@ -171,6 +186,7 @@ class App(tk.Tk):
         self.gop   = tk.DoubleVar(value=d["gop"])
         self.fflog = tk.StringVar(value=d["fflog"])
         self.sink  = tk.StringVar(value=d["sink"])
+        self.latency = tk.StringVar(value=d["latency"])
         # virtual
         self.virt_enabled = tk.BooleanVar(value=d["virt_enabled"])
         self.virt_res     = tk.StringVar(value=d["virt_res"])
@@ -180,6 +196,11 @@ class App(tk.Tk):
         # app launcher
         self.app_choice   = tk.StringVar(value=d["app_choice"])
         self.app_arg      = tk.StringVar(value=d["app_arg"])
+        # net
+        self.lan_only     = tk.BooleanVar(value=d["lan_only"])
+        self.vlc_web_auto = tk.BooleanVar(value=d["vlc_web_auto"])
+        self.vlc_web_port = tk.IntVar(value=d["vlc_web_port"])
+        self.vlc_web_pass = tk.StringVar(value=d["vlc_web_pass"])
 
         r = 0
         ttk.Label(frm, text="Mode:").grid(row=r, column=0, sticky="w")
@@ -187,7 +208,7 @@ class App(tk.Tk):
         ttk.Label(frm, text="App-ID:").grid(row=r, column=2, sticky="w", padx=(16,0))
         ttk.Entry(frm, textvariable=self.appid, width=16).grid(row=r, column=3, sticky="w")
         ttk.Label(frm, text="Namespace:").grid(row=r, column=4, sticky="w", padx=(16,0))
-        ttk.Entry(frm, textvariable=self.ns, width=28).grid(row=r, column=5, sticky="w")
+        ttk.Entry(frm, textvariable=self.ns, width=30).grid(row=r, column=5, sticky="w")
 
         r += 1
         ttk.Label(frm, text="Device (Name enthält):").grid(row=r, column=0, sticky="w", pady=6)
@@ -217,6 +238,10 @@ class App(tk.Tk):
         ttk.Combobox(frm, textvariable=self.fflog, values=["quiet","error","warning","info","debug"], width=10, state="readonly").grid(row=r, column=1, sticky="w")
         ttk.Label(frm, text="Sink-Name:").grid(row=r, column=2, sticky="w")
         ttk.Entry(frm, textvariable=self.sink, width=16).grid(row=r, column=3, sticky="w")
+        ttk.Label(frm, text="Latenz:").grid(row=r, column=4, sticky="w")
+        self.latency_cb = ttk.Combobox(frm, textvariable=self.latency, values=["normal","low","ultra"], width=10, state="readonly")
+        self.latency_cb.grid(row=r, column=5, sticky="w")
+        self.latency_cb.bind("<<ComboboxSelected>>", self._on_latency_changed)
 
         # Virtual display section
         vr = ttk.LabelFrame(self, text="Virtueller Monitor")
@@ -224,6 +249,7 @@ class App(tk.Tk):
         ttk.Checkbutton(vr, text="Virtuellen Monitor verwenden", variable=self.virt_enabled, command=self._toggle_virtual).grid(row=0, column=0, sticky="w", padx=8, pady=6)
         ttk.Label(vr, text="Backend:").grid(row=0, column=1, sticky="w")
         ttk.Combobox(vr, textvariable=self.virt_backend, values=["auto","xephyr","xvfb"], width=8, state="readonly").grid(row=0, column=2, sticky="w")
+        ttk.Button(vr, text="4K-Preset", command=self._set_4k).grid(row=0, column=3, sticky="w", padx=6)
         ttk.Label(vr, text="Virtuelles Display:").grid(row=1, column=0, sticky="w", padx=8)
         self.entry_vdisp = ttk.Entry(vr, textvariable=self.virt_disp, width=8)
         self.entry_vdisp.grid(row=1, column=1, sticky="w")
@@ -232,26 +258,52 @@ class App(tk.Tk):
         ttk.Checkbutton(vr, text="Openbox starten (Fenster-Manager)", variable=self.virt_wm).grid(row=1, column=4, sticky="w", padx=(16,0))
 
         # App Launcher
-        al = ttk.LabelFrame(self, text="App im virtuellen Monitor starten")
+        al = ttk.LabelFrame(self, text="App im virtuellen Monitor starten (optional)")
         al.pack(fill="x", padx=10, pady=(0,8))
         ttk.Label(al, text="App:").grid(row=0, column=0, sticky="w", padx=8, pady=6)
         ttk.Combobox(al, textvariable=self.app_choice, values=["none","Firefox","VLC","Custom"], width=10, state="readonly").grid(row=0, column=1, sticky="w")
         ttk.Label(al, text="URL / Datei / Befehl:").grid(row=0, column=2, sticky="w", padx=(16,0))
-        ttk.Entry(al, textvariable=self.app_arg, width=40).grid(row=0, column=3, sticky="w")
+        ttk.Entry(al, textvariable=self.app_arg, width=48).grid(row=0, column=3, sticky="w")
         ttk.Button(al, text="Datei…", command=self._pick_file).grid(row=0, column=4, sticky="w", padx=6)
         ttk.Button(al, text="App starten", command=self.on_launch_app).grid(row=0, column=5, sticky="w", padx=8)
 
+        # Netzwerk & Autostart
+        net = ttk.LabelFrame(self, text="Netzwerk & Autostart")
+        net.pack(fill="x", padx=10, pady=(0,8))
+        ttk.Checkbutton(net, text="LAN-only (abbrechen, wenn Pfad nicht lokales Netzwerk ist)", variable=self.lan_only).grid(row=0, column=0, sticky="w", padx=8, pady=4, columnspan=3)
+        ttk.Checkbutton(net, text="VLC Web-Remote Autostart", variable=self.vlc_web_auto).grid(row=1, column=0, sticky="w", padx=8)
+        ttk.Label(net, text="Port:").grid(row=1, column=1, sticky="e")
+        ttk.Entry(net, textvariable=self.vlc_web_port, width=6).grid(row=1, column=2, sticky="w")
+        ttk.Label(net, text="Passwort:").grid(row=1, column=3, sticky="e", padx=(12,0))
+        ttk.Entry(net, textvariable=self.vlc_web_pass, width=12, show="•").grid(row=1, column=4, sticky="w")
+
         btns = ttk.Frame(self); btns.pack(fill="x", padx=10, pady=(0,8))
         self.start_btn = ttk.Button(btns, text="Start", command=self.on_start)
-        self.stop_btn  = ttk.Button(btns, text="Stop", command=self.on_stop, state="disabled")
+        self.stop_btn  = ttk.Button(btns, text="Stop", command=lambda: self.on_stop(reason="Stop-Button"), state="disabled")
         self.start_btn.pack(side="left"); self.stop_btn.pack(side="left", padx=(8,0))
+
+        self.status = tk.StringVar(value="bereit")
+        st = ttk.Frame(self); st.pack(fill="x", padx=10, pady=(0,4))
+        ttk.Label(st, text="Status:").pack(side="left")
+        self.status_lbl = ttk.Label(st, textvariable=self.status)
+        self.status_lbl.pack(side="left")
 
         self.txt = tk.Text(self, height=18, wrap="word")
         self.txt.pack(fill="both", expand=True, padx=10, pady=10)
-        self.txt.insert("end", "Bereit. 'Start' beginnt den Stream (direct).\n")
+        self._log("Bereit. 'Start' beginnt den Stream (direct).")
 
         self._toggle_virtual()
-        self.after(100, self._drain)
+
+    # ---------- Misc UI actions ----------
+    def _set_4k(self):
+        self.virt_res.set("3840x2160")
+
+    def _set_status(self, s):
+        self.status.set(s)
+
+    def _log(self, s):
+        self.txt.insert("end", s + ("\n" if not s.endswith("\n") else ""))
+        self.txt.see("end")
 
     def _pick_file(self):
         path = filedialog.askopenfilename()
@@ -260,11 +312,11 @@ class App(tk.Tk):
 
     def _toggle_virtual(self):
         use = self.virt_enabled.get()
-        state = "disabled" if use else "normal"
-        self.entry_disp.config(state=state)
+        self.entry_disp.config(state=("disabled" if use else "normal"))
         for w in (self.entry_vdisp,):
-            w.config(state="normal" if use else "disabled")
+            w.config(state=("normal" if use else "disabled"))
 
+    # ---------- Process building ----------
     def _cmdline(self):
         args = [sys.executable, CAST_STREAM,
                 "--mode", self.mode.get(),
@@ -278,9 +330,11 @@ class App(tk.Tk):
                 "--gop-seconds", str(self.gop.get()),
                 "--fflog", self.fflog.get(),
                 "--sink-name", self.sink.get(),
+                "--latency", self.latency.get(),
                 "--save-config"]
         if self.name.get(): args += ["--device", self.name.get()]
         if self.ip.get():   args += ["--ip", self.ip.get()]
+        if self.lan_only.get(): args += ["--lan-only"]
         if self.virt_enabled.get():
             args += ["--virtual", "--virtual-res", self.virt_res.get(),
                      "--virtual-display", self.virt_disp.get(),
@@ -288,31 +342,63 @@ class App(tk.Tk):
             if self.virt_wm.get():   args += ["--virtual-wm"]
         return args
 
+    # ---------- Runtime parsing ----------
+    def _parse_runtime(self, line: str):
+        m = re.search(r"DISPLAY=(:\d+)", line)
+        if m:
+            self.runtime_virtual_display = m.group(1)
+        if "Streaming started" in line:
+            self._set_status("streamt …")
+        if line.strip().startswith("--- cleanup done"):
+            self._set_status("gestoppt")
+        if line.strip().startswith("--- Path Check"):
+            self._set_status("prüfe Pfad …")
+
+    # ---------- Queue-Drain (fix) ----------
+    def _drain(self):
+        """Periodisch Ausgaben aus der Reader-Queue ins Textfeld schreiben."""
+        try:
+            while True:
+                s = self.q.get_nowait()
+                self._parse_runtime(s)
+                self._log(s.rstrip("\n"))
+        except queue.Empty:
+            pass
+        # weiter pollen
+        self.after(120, self._drain)
+
+    # ---------- Reader/Watcher ----------
     def _reader(self, pipe):
         for line in iter(pipe.readline, b""):
             try:
                 s = line.decode(errors="replace")
-                self._parse_runtime(s)
                 self.q.put(s)
             except Exception:
                 pass
-        pipe.close()
+        try: pipe.close()
+        except Exception: pass
 
-    def _parse_runtime(self, line: str):
-        # Parse "👉 Run apps in: DISPLAY=:2 <app> &"
-        m = re.search(r"DISPLAY=(:\d+)", line)
-        if m:
-            self.runtime_virtual_display = m.group(1)
+    def _watch_proc(self, p):
+        p.wait()
+        self.after(0, self._on_process_end)
 
-    def on_start(self):
-        if self.proc: return
-        if not os.path.exists(CAST_STREAM):
-            messagebox.showerror("Fehlt", f"{CAST_STREAM} nicht gefunden."); return
+    def _on_process_end(self):
+        self.proc = None
+        self.start_btn.config(state="normal")
+        self.stop_btn.config(state="disabled")
+        if not self._pending_restart:
+            self._set_status("bereit")
+        self._log("Prozess beendet.")
+        # geplanter Neustart?
+        if self._pending_restart:
+            why = self._pending_restart_reason or "Neustart"
+            self._pending_restart = False
+            self._pending_restart_reason = None
+            self._set_status(f"Starte neu ({why}) …")
+            self.after(600, self.on_start)
 
-        if not self.virt_enabled.get() and not validate_display(self.disp.get()):
-            if messagebox.askyesno("Display prüfen", f"Display '{self.disp.get()}' ist evtl. nicht erreichbar.\nTrotzdem starten (oder 'Virtuellen Monitor' aktivieren)?") is False:
-                return
-
+    # ---------- Start/Stop ----------
+    def _save_all_cfg(self):
         save_cfg({
             "mode": self.mode.get(),
             "app_id": self.appid.get(),
@@ -327,6 +413,7 @@ class App(tk.Tk):
             "gop": self.gop.get(),
             "fflog": self.fflog.get(),
             "sink": self.sink.get(),
+            "latency": self.latency.get(),
             "virt_enabled": self.virt_enabled.get(),
             "virt_res": self.virt_res.get(),
             "virt_disp": self.virt_disp.get(),
@@ -334,68 +421,99 @@ class App(tk.Tk):
             "virt_backend": self.virt_backend.get(),
             "app_choice": self.app_choice.get(),
             "app_arg": self.app_arg.get(),
+            "lan_only": self.lan_only.get(),
+            "vlc_web_auto": self.vlc_web_auto.get(),
+            "vlc_web_port": self.vlc_web_port.get(),
+            "vlc_web_pass": self.vlc_web_pass.get(),
         })
+
+    def on_start(self):
+        if self.proc: return
+        if not os.path.exists(CAST_STREAM):
+            messagebox.showerror("Fehlt", f"{CAST_STREAM} nicht gefunden."); return
+
+        if not self.virt_enabled.get() and not validate_display(self.disp.get()):
+            if messagebox.askyesno("Display prüfen", f"Display '{self.disp.get()}' ist evtl. nicht erreichbar.\nTrotzdem starten (oder 'Virtuellen Monitor' aktivieren)?") is False:
+                return
+
+        self._save_all_cfg()
 
         self.runtime_virtual_display = None
         args = self._cmdline()
-        self.txt.insert("end", "$ " + " ".join(args) + "\n"); self.txt.see("end")
+        self._log("$ " + " ".join(args))
         try:
-            self.proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            # eigene Prozessgruppe, damit wir ffmpeg & Kinder sicher killen
+            self.proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, preexec_fn=os.setsid)
         except Exception as e:
             messagebox.showerror("Fehler", str(e)); self.proc=None; return
         self.start_btn.config(state="disabled")
         self.stop_btn.config(state="normal")
+        self._set_status("prüfe Pfad …")
+
         threading.Thread(target=self._reader, args=(self.proc.stdout,), daemon=True).start()
+        threading.Thread(target=self._watch_proc, args=(self.proc,), daemon=True).start()
 
-    def on_stop(self):
+    def on_stop(self, reason="Stop"):
         if not self.proc: return
-        try: self.proc.send_signal(signal.SIGINT)
-        except Exception: self.proc.terminate()
-        self.proc = None
-        self.start_btn.config(state="normal")
-        self.stop_btn.config(state="disabled")
-        self.txt.insert("end", "Gestoppt.\n"); self.txt.see("end")
-
-    def _drain(self):
+        self._log(f"Stoppe Stream … ({reason})")
         try:
-            while True:
-                line = self.q.get_nowait()
-                self.txt.insert("end", line); self.txt.see("end")
-        except queue.Empty:
-            pass
-        self.after(100, self._drain)
+            # Erst SIGINT an komplette Gruppe
+            os.killpg(os.getpgid(self.proc.pid), signal.SIGINT)
+        except Exception:
+            try: self.proc.terminate()
+            except Exception: pass
 
+        # kleine Wartezeit, danach ggf. härter beenden
+        def _ensure_dead():
+            if self.proc and self.proc.poll() is None:
+                try:
+                    os.killpg(os.getpgid(self.proc.pid), signal.SIGKILL)
+                except Exception:
+                    try: self.proc.kill()
+                    except Exception: pass
+        self.after(1800, _ensure_dead)
+
+    # ---------- Latency change triggers quick restart ----------
+    def _on_latency_changed(self, _evt=None):
+        self._save_all_cfg()
+        if self.proc:
+            self._quick_restart("Latenz geändert")
+        else:
+            self._set_status("Latenz übernommen (wirkt beim nächsten Start).")
+
+    def _quick_restart(self, reason="Einstellungen geändert"):
+        if self._pending_restart:
+            return
+        self._pending_restart = True
+        self._pending_restart_reason = reason
+        self._set_status(f"Neustart: {reason} …")
+        self.on_stop(reason=reason)
+
+    # ---------- App launcher ----------
     def on_launch_app(self):
         if not self.virt_enabled.get():
             messagebox.showinfo("Virtueller Monitor", "Bitte zuerst 'Virtuellen Monitor' aktivieren.")
             return
         disp = self.runtime_virtual_display or (self.virt_disp.get() if self.virt_disp.get().lower()!="auto" else None)
         if not disp:
-            messagebox.showinfo("Warte auf Display", "Der virtuelle Monitor startet gerade. Bitte starte den Stream oder warte, bis im Log die Zeile\n'👉 Run apps in: DISPLAY=:N' erscheint.")
+            messagebox.showinfo("Warte auf Display", "Der virtuelle Monitor startet gerade. Starte den Stream oder warte, bis im Log die Zeile\n'👉 Run apps in: DISPLAY=:N' erscheint.")
             return
 
         choice = self.app_choice.get()
         arg = self.app_arg.get().strip()
-
         if choice == "none":
             messagebox.showinfo("App", "Bitte eine App auswählen.")
             return
 
         if choice == "Firefox":
             argv, hint = resolve_firefox_cmd()
-            if not argv:
-                messagebox.showerror("Firefox fehlt", hint)
-                return
-            if arg:
-                argv = argv + [arg]
+            if not argv: messagebox.showerror("Firefox fehlt", hint); return
+            if arg: argv = argv + [arg]
         elif choice == "VLC":
             argv, hint = resolve_vlc_cmd()
-            if not argv:
-                messagebox.showerror("VLC fehlt", hint)
-                return
-            if arg:
-                argv = argv + [arg]
-        else:  # Custom
+            if not argv: messagebox.showerror("VLC fehlt", hint); return
+            if arg: argv = argv + [arg]
+        else:
             if not arg:
                 messagebox.showinfo("Custom", "Bitte Befehl eingeben, z.B. 'chromium https://example.com'")
                 return
@@ -405,13 +523,15 @@ class App(tk.Tk):
         env["DISPLAY"] = disp
         try:
             subprocess.Popen(argv, env=env)
-            self.txt.insert("end", f"🚀 Gestartet auf {disp}: {' '.join(argv)}\n"); self.txt.see("end")
+            self._log(f"🚀 Gestartet auf {disp}: {' '.join(argv)}")
         except Exception as e:
             messagebox.showerror("Start fehlgeschlagen", str(e))
 
+# ----------------------------- Main -----------------------------
 if __name__ == "__main__":
     try:
-        import tkinter  # noqa: F401
+        import tkinter  # noqa
     except Exception:
         print("Bitte 'python3-tk' installieren: sudo apt install python3-tk", file=sys.stderr); sys.exit(1)
     App().mainloop()
+
