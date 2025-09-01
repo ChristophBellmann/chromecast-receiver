@@ -1,3 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# in das Repo wechseln (Ordner, in dem dieses Skript liegt)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+mkdir -p python scripts
+
+# 1) python/cast_stream.py (pychromecast-Fix integriert)
+cat > python/cast_stream.py <<'PY'
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -267,3 +278,99 @@ def main():
 
 if __name__ == "__main__":
     main()
+PY
+chmod +x python/cast_stream.py
+
+# 2) receiver.html – Broadcast-Fix (nur falls noch nicht geändert)
+if grep -q "bus\.send({type:'start'})" receiver.html 2>/dev/null; then
+  sed -i "s/bus\.send({type:'start'})/bus.broadcast(JSON.stringify({type:'start'}))/g" receiver.html
+  echo "receiver.html: send() -> broadcast(JSON.stringify(...)) geändert."
+else
+  echo "receiver.html: Broadcast-Fix bereits vorhanden oder Pattern nicht gefunden."
+fi
+
+# 3) scripts/install.sh – robuster Installer mit dpkg-Audit
+cat > scripts/install.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TARGET_DIR="${HOME}/.local/share/chromecast-receiver"
+BIN_DIR="${HOME}/.local/bin"
+APP_DIR="${HOME}/.local/share/applications"
+
+# abbrechen, wenn dpkg/apt in schlechtem Zustand
+if ! sudo dpkg --audit >/dev/null 2>&1; then
+  echo "dpkg meldet einen inkonsistenten Zustand."
+  echo "Bitte zuerst reparieren: sudo dpkg --configure -a && sudo apt-get -f install"
+  exit 1
+fi
+
+echo "➡️  Installing to ${TARGET_DIR} …"
+mkdir -p "${TARGET_DIR}" "${BIN_DIR}" "${APP_DIR}"
+
+echo "➡️  Installing system packages (sudo may ask for password) …"
+sudo apt update
+sudo apt install -y ffmpeg pulseaudio-utils python3-venv python3-tk
+
+echo "➡️  Copy project files …"
+rsync -a --delete "${REPO_DIR}/" "${TARGET_DIR}/"
+
+echo "➡️  Create virtualenv …"
+python3 -m venv "${TARGET_DIR}/.venv"
+"${TARGET_DIR}/.venv/bin/pip" install --upgrade pip wheel
+"${TARGET_DIR}/.venv/bin/pip" install pychromecast
+
+echo "➡️  Install launcher …"
+cat > "${BIN_DIR}/chromecast-streamer" <<'EOF'
+#!/usr/bin/env bash
+APP_DIR="${HOME}/.local/share/chromecast-receiver"
+exec "${APP_DIR}/.venv/bin/python" "${APP_DIR}/python/cast_gui.py"
+EOF
+chmod +x "${BIN_DIR}/chromecast-streamer"
+
+echo "➡️  Desktop entry …"
+cat > "${APP_DIR}/chromecast-streamer.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Chromecast Streamer
+Comment=Stream your desktop directly to Chromecast
+Exec=chromecast-streamer
+Icon=display
+Terminal=false
+Categories=AudioVideo;Network;
+EOF
+
+echo "✅ Installation complete."
+echo "• Start über Anwendungsmenü: 'Chromecast Streamer'"
+echo "• Oder im Terminal: chromecast-streamer"
+SH
+chmod +x scripts/install.sh
+
+# 4) README.md – inkl. Uninstall
+cat > README.md <<'MD'
+# Chromecast Receiver & Desktop Streamer
+
+Ein Tool zum **direkten Desktop-Streaming** auf einen Chromecast – wahlweise
+- **direct**: Stream startet sofort
+- **wait**: zuerst deine `receiver.html` (Intro/Buttons), Start per „Stream“-Button
+
+## Inhalte
+
+- `receiver.html` – Custom Receiver (CAF), per **HTTPS** hosten (in der Cast Developer Console hinterlegen)
+- `splash-0.1.png` – Splash-Bild
+- `python/cast_stream.py` – EIN Streaming-Tool (CLI; direct/wait)
+- `python/cast_gui.py` – kleines Start/Stop-GUI
+
+> **Hinweis:** Im Receiver sollte beim Stream-Button  
+> `bus.broadcast(JSON.stringify({type:'start'}))`  
+> verwendet werden (statt `send()` ohne `senderId`).
+
+---
+
+## Installation (Pop!_OS / Ubuntu)
+
+```bash
+cd ~/Dokumente/Entwicklung/chromecast-receiver
+chmod +x scripts/install.sh
+./scripts/install.sh
