@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-cast_stream.py — unified Chromecast desktop streaming tool (direct / wait)
-
-Works with multiple pychromecast versions (friendly_name access is robust).
+cast_stream.py — Chromecast desktop streaming (direct / wait)
+Now with config support:
+  Priority: CLI flags > ~/.config/chromecast-streamer/config.ini > ./config.local.ini > defaults
 """
 
-import argparse, os, sys, time, json, socket, signal, subprocess, threading
+import argparse, os, sys, time, json, socket, signal, subprocess, threading, configparser
 from typing import Optional, Tuple, List
 
 try:
@@ -26,6 +26,9 @@ DEF_SINK_NAME  = "cast_sink"
 DEF_APP_ID     = "22B2DA66"
 DEF_NS         = "urn:x-cast:com.example.stream"
 DEF_FFLOG      = "info"
+
+CONFIG_USER = os.path.expanduser("~/.config/chromecast-streamer/config.ini")
+CONFIG_LOCAL = os.path.abspath("config.local.ini")
 
 # Globals for cleanup
 ffmpeg_proc    = None
@@ -55,6 +58,28 @@ def cleanup(_sig=None, _frm=None):
 
 for _sig in (signal.SIGINT, signal.SIGTERM):
     signal.signal(_sig, cleanup)
+
+# ---------- Config ----------
+def load_config(paths: List[str]) -> configparser.ConfigParser:
+    cfg = configparser.ConfigParser()
+    cfg.read([p for p in paths if p and os.path.exists(p)])
+    return cfg
+
+def cfg_get(cfg, section, key, default=None):
+    try:
+        return cfg.get(section, key, fallback=default)
+    except Exception:
+        return default
+
+def cfg_getint(cfg, section, key, default=None):
+    try:
+        return cfg.getint(section, key, fallback=default)
+    except Exception:
+        return default
+
+def ensure_user_config_dir():
+    d = os.path.dirname(CONFIG_USER)
+    os.makedirs(d, exist_ok=True)
 
 # ---------- PulseAudio ----------
 def get_default_sink() -> Optional[str]:
@@ -124,7 +149,6 @@ def build_ffmpeg_cmd(audio_src: str, fps: int, res: str, display: str,
 
 # ---------- Chromecast helpers ----------
 def cc_friendly_name(c) -> str:
-    """Return a friendly name across pychromecast versions."""
     return (
         getattr(getattr(c, "device", None), "friendly_name", None)
         or getattr(c, "name", None)
@@ -167,7 +191,6 @@ def start_receiver(cast, app_id: str):
     ok = cast.start_app(app_id)
     time.sleep(3)
     print("start_app returned:", ok)
-    # robust print (older versions may lack .status)
     try:
         disp = cast.status.display_name
     except Exception:
@@ -177,7 +200,6 @@ def start_receiver(cast, app_id: str):
             disp = None
     print("running App-ID:", getattr(cast, "app_id", "?"), "| Display-Name:", disp or "?")
 
-# ---------- Wait controller ----------
 class WaitController(BaseController):
     def __init__(self, namespace: str):
         super().__init__(namespace)
@@ -199,52 +221,96 @@ def main():
         description="Cast your Linux desktop to Chromecast (direct or wait for receiver UI).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    ap.add_argument("--mode", choices=["direct","wait"], default="direct",
-                    help="direct: start streaming immediately; wait: wait for receiver button")
-    ap.add_argument("--app-id", default=DEF_APP_ID, help="Custom Receiver App ID")
-    ap.add_argument("--ns", default=DEF_NS, help="Custom message namespace (wait-mode)")
-    ap.add_argument("--device", help="Chromecast name substring to pick a specific device")
-    ap.add_argument("--ip", help="Chromecast IP address to pick a specific device")
-    ap.add_argument("--port", type=int, default=DEF_PORT, help="Local HTTP port for MP4 stream")
-    ap.add_argument("--fps", type=int, default=DEF_FPS, help="Frames per second")
-    ap.add_argument("--resolution", default=DEF_RES, help="Capture resolution WxH")
-    ap.add_argument("--display", default=DEF_DISPLAY, help="X11 DISPLAY to capture")
-    ap.add_argument("--gop-seconds", type=float, default=2.0, help="Keyframe interval in seconds")
-    ap.add_argument("--hw", choices=["auto","vaapi","cuda","qsv","software"], default="auto",
-                    help="Hardware encoder selection")
-    ap.add_argument("--sink-name", default=DEF_SINK_NAME, help="PulseAudio sink name to create")
-    ap.add_argument("--fflog", default=DEF_FFLOG, help="FFmpeg loglevel (quiet|error|warning|info|debug)")
+    # defaults = None, so config can fill them
+    ap.add_argument("--mode", choices=["direct","wait"], default=None)
+    ap.add_argument("--app-id", default=None)
+    ap.add_argument("--ns", default=None)
+    ap.add_argument("--device", default=None)
+    ap.add_argument("--ip", default=None)
+    ap.add_argument("--port", type=int, default=None)
+    ap.add_argument("--fps", type=int, default=None)
+    ap.add_argument("--resolution", default=None)
+    ap.add_argument("--display", default=None)
+    ap.add_argument("--gop-seconds", type=float, default=None)
+    ap.add_argument("--hw", choices=["auto","vaapi","cuda","qsv","software"], default=None)
+    ap.add_argument("--sink-name", default=None)
+    ap.add_argument("--fflog", default=None)
+    ap.add_argument("--config", help="Optional config path to read")
+    ap.add_argument("--save-config", action="store_true", help="Persist current effective settings to ~/.config/chromecast-streamer/config.ini")
     args = ap.parse_args()
 
+    # Load config baseline
+    cfg = load_config([args.config or "", CONFIG_USER, CONFIG_LOCAL])
+
+    # Resolve effective values (CLI > config > defaults)
+    mode        = args.mode        or cfg_get(cfg, "stream","mode",        "direct")
+    app_id      = args.app_id      or cfg_get(cfg, "cast","app_id",        DEF_APP_ID)
+    ns          = args.ns          or cfg_get(cfg, "cast","namespace",     DEF_NS)
+    device      = args.device      or cfg_get(cfg, "cast","device_name",   None)
+    ip          = args.ip          or cfg_get(cfg, "cast","device_ip",     None)
+    port        = args.port        or cfg_getint(cfg,"stream","port",      DEF_PORT)
+    fps         = args.fps         or cfg_getint(cfg,"stream","fps",       DEF_FPS)
+    res         = args.resolution  or cfg_get(cfg, "stream","resolution",  DEF_RES)
+    disp        = args.display     or cfg_get(cfg, "stream","display",     DEF_DISPLAY)
+    gop_s       = args.gop_seconds or float(cfg_get(cfg,"stream","gop_seconds", "2.0"))
+    hw          = args.hw          or cfg_get(cfg, "stream","hw",          "auto")
+    sink        = args.sink_name   or cfg_get(cfg, "stream","sink_name",   DEF_SINK_NAME)
+    fflog       = args.fflog       or cfg_get(cfg, "stream","fflog",       DEF_FFLOG)
+
+    # Optionally persist resolved settings to user config
+    if args.save_config:
+        d = os.path.dirname(CONFIG_USER)
+        os.makedirs(d, exist_ok=True)
+        out = configparser.ConfigParser()
+        out["cast"] = {
+            "app_id": app_id,
+            "namespace": ns,
+            "device_name": device or "",
+            "device_ip": ip or "",
+        }
+        out["stream"] = {
+            "resolution": res,
+            "fps": str(fps),
+            "gop_seconds": str(gop_s),
+            "port": str(port),
+            "hw": hw,
+            "display": disp,
+            "fflog": fflog,
+            "sink_name": sink,
+            "mode": mode,
+        }
+        with open(CONFIG_USER, "w") as f:
+            out.write(f)
+        print(f"Saved config → {CONFIG_USER}")
+
     print("Discovering Chromecast …")
-    cast = find_chromecast(args.device, args.ip)
+    cast = find_chromecast(device, ip)
     cast.wait()
     cast_obj = cast
     host, cport = host_port(cast)
     print(f"Chromecast: {cc_friendly_name(cast)} @ {host}:{cport}")
 
-    if args.app_id:
-        print(f"Launching receiver app {args.app_id} …")
-        start_receiver(cast, args.app_id)
+    if app_id:
+        print(f"Launching receiver app {app_id} …")
+        start_receiver(cast, app_id)
 
-    if args.mode == "wait":
-        ctrl = WaitController(args.ns)
+    if mode == "wait":
+        ctrl = WaitController(ns)
         cast.register_handler(ctrl)
         print("Waiting for 'start' from receiver …")
         ctrl.event.wait()
         print("Receiver requested streaming.")
 
     print("Setting up PulseAudio null sink …")
-    audio_src = setup_null_sink(args.sink_name)
+    audio_src = setup_null_sink(sink)
 
-    if args.hw == "auto":
+    if hw == "auto":
         hw_sel = detect_hwaccel_auto()
     else:
-        hw_sel = args.hw
+        hw_sel = hw
 
-    gop_frames = max(1, int(args.fps * args.gop_seconds))
-    cmd = build_ffmpeg_cmd(audio_src, args.fps, args.resolution, args.display,
-                           args.fflog, hw_sel, gop_frames, args.port)
+    gop_frames = max(1, int(fps * gop_s))
+    cmd = build_ffmpeg_cmd(audio_src, fps, res, disp, fflog, hw_sel, gop_frames, port)
 
     print("Starting FFmpeg …")
     global ffmpeg_proc
@@ -252,7 +318,7 @@ def main():
     time.sleep(1)
 
     lip = local_ip_for(host, cport)
-    stream_url = f"http://{lip}:{args.port}/"
+    stream_url = f"http://{lip}:{port}/"
     print("Stream URL:", stream_url)
 
     mc = cast.media_controller

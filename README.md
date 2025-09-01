@@ -2,6 +2,7 @@
 
 > Streamt deinen Linux-Desktop **direkt** auf einen Chromecast – wahlweise sofort (**direct**) oder erst nach Klick im Receiver-UI (**wait**).
 
+[![Developer Setup Guide](https://img.shields.io/badge/Docs-Developer%20Setup%20Guide-0A84FF?logo=google-chrome&logoColor=white)](./docs/DEV_SETUP.md)
 ![Status](https://img.shields.io/badge/OS-Pop!_OS%20%7C%20Ubuntu-blue)
 ![FFmpeg](https://img.shields.io/badge/FFmpeg-required-brightgreen)
 ![Python](https://img.shields.io/badge/Python-3.8%2B-informational)
@@ -20,6 +21,8 @@
 - **Volle Kontrolle via Flags** (Auflösung, FPS, Port, Gerät, Loglevel, …)
 - **GUI inklusive** (`python/cast_gui.py`) – Start/Stop per Klick
 - **Sauberes Cleanup**: Receiver beenden, FFmpeg stoppen, PulseAudio zurücksetzen
+
+> 🔧 **Developer Setup Guide:** siehe [docs/DEV_SETUP.md](./docs/DEV_SETUP.md)
 
 ---
 
