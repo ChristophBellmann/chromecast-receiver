@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import os, sys, subprocess, threading, queue, signal, configparser
+import os, sys, subprocess, threading, queue, signal, configparser, shutil
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -14,6 +14,8 @@ def load_cfg():
     cfg.read([CONFIG_USER, CONFIG_LOCAL])
     c = cfg["cast"] if "cast" in cfg else {}
     s = cfg["stream"] if "stream" in cfg else {}
+    v = cfg["virtual"] if "virtual" in cfg else {}
+    getenv_disp = os.environ.get("DISPLAY", ":0")
     def geti(sec, key, default=""):
         try:
             return (sec.get(key) if hasattr(sec, "get") else default) or default
@@ -40,10 +42,15 @@ def load_cfg():
         "fps":        geti_int(s, "fps", 30),
         "hw":         geti(s, "hw", "auto"),
         "port":       geti_int(s, "port", 8090),
-        "display":    geti(s, "display", ":0"),
+        "display":    geti(s, "display", getenv_disp),
         "gop":        geti_float(s, "gop_seconds", 2.0),
         "fflog":      geti(s, "fflog", "info"),
         "sink":       geti(s, "sink_name", "cast_sink"),
+        # virtual
+        "virt_enabled": geti(v, "enabled", "false").lower() == "true",
+        "virt_res":     geti(v, "resolution", "3840x2160"),
+        "virt_disp":    geti(v, "display", "auto"),
+        "virt_wm":      geti(v, "wm", "true").lower() == "true",
     }
 
 def save_cfg(d):
@@ -66,38 +73,60 @@ def save_cfg(d):
         "sink_name": d["sink"],
         "mode": d["mode"],
     }
+    cfg["virtual"] = {
+        "enabled": str(d["virt_enabled"]),
+        "resolution": d["virt_res"],
+        "display": d["virt_disp"],
+        "wm": str(d["virt_wm"]),
+    }
     with open(CONFIG_USER, "w") as f:
         cfg.write(f)
+
+def validate_display(disp: str) -> bool:
+    if not disp:
+        return False
+    if shutil.which("xdpyinfo") is None:
+        return True
+    try:
+        r = subprocess.run(["xdpyinfo","-display",disp], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+        return r.returncode == 0
+    except Exception:
+        return False
 
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Chromecast Streamer")
-        self.geometry("780x560")
+        self.geometry("820x620")
         self.proc = None
         self.q = queue.Queue()
         self._build_ui()
         self.after(100, self._drain)
 
     def _build_ui(self):
-        defaults = load_cfg()
+        d = load_cfg()
 
         frm = ttk.Frame(self, padding=10)
         frm.pack(fill="x")
 
-        self.mode = tk.StringVar(value=defaults["mode"])
-        self.appid = tk.StringVar(value=defaults["app_id"])
-        self.ns    = tk.StringVar(value=defaults["namespace"])
-        self.name  = tk.StringVar(value=defaults["device"])
-        self.ip    = tk.StringVar(value=defaults["ip"])
-        self.res   = tk.StringVar(value=defaults["resolution"])
-        self.fps   = tk.IntVar(value=defaults["fps"])
-        self.hw    = tk.StringVar(value=defaults["hw"])
-        self.port  = tk.IntVar(value=defaults["port"])
-        self.disp  = tk.StringVar(value=defaults["display"])
-        self.gop   = tk.DoubleVar(value=defaults["gop"])
-        self.fflog = tk.StringVar(value=defaults["fflog"])
-        self.sink  = tk.StringVar(value=defaults["sink"])
+        self.mode = tk.StringVar(value=d["mode"])
+        self.appid = tk.StringVar(value=d["app_id"])
+        self.ns    = tk.StringVar(value=d["namespace"])
+        self.name  = tk.StringVar(value=d["device"])
+        self.ip    = tk.StringVar(value=d["ip"])
+        self.res   = tk.StringVar(value=d["resolution"])
+        self.fps   = tk.IntVar(value=d["fps"])
+        self.hw    = tk.StringVar(value=d["hw"])
+        self.port  = tk.IntVar(value=d["port"])
+        self.disp  = tk.StringVar(value=d["display"])
+        self.gop   = tk.DoubleVar(value=d["gop"])
+        self.fflog = tk.StringVar(value=d["fflog"])
+        self.sink  = tk.StringVar(value=d["sink"])
+        # virtual
+        self.virt_enabled = tk.BooleanVar(value=d["virt_enabled"])
+        self.virt_res     = tk.StringVar(value=d["virt_res"])
+        self.virt_disp    = tk.StringVar(value=d["virt_disp"])
+        self.virt_wm      = tk.BooleanVar(value=d["virt_wm"])
 
         r = 0
         ttk.Label(frm, text="Mode:").grid(row=r, column=0, sticky="w")
@@ -125,7 +154,8 @@ class App(tk.Tk):
         ttk.Label(frm, text="Port:").grid(row=r, column=0, sticky="w", pady=6)
         ttk.Entry(frm, textvariable=self.port, width=8).grid(row=r, column=1, sticky="w")
         ttk.Label(frm, text="Display:").grid(row=r, column=2, sticky="w")
-        ttk.Entry(frm, textvariable=self.disp, width=10).grid(row=r, column=3, sticky="w")
+        self.entry_disp = ttk.Entry(frm, textvariable=self.disp, width=10)
+        self.entry_disp.grid(row=r, column=3, sticky="w")
         ttk.Label(frm, text="GOP (s):").grid(row=r, column=4, sticky="w")
         ttk.Entry(frm, textvariable=self.gop, width=8).grid(row=r, column=5, sticky="w")
 
@@ -135,16 +165,36 @@ class App(tk.Tk):
         ttk.Label(frm, text="Sink-Name:").grid(row=r, column=2, sticky="w")
         ttk.Entry(frm, textvariable=self.sink, width=16).grid(row=r, column=3, sticky="w")
 
-        btns = ttk.Frame(frm); btns.grid(row=r, column=4, columnspan=2, sticky="e")
+        # Virtual display section
+        vr = ttk.LabelFrame(self, text="Virtueller Monitor (Xephyr)")
+        vr.pack(fill="x", padx=10, pady=(0,8))
+        ttk.Checkbutton(vr, text="Virtuellen Monitor verwenden", variable=self.virt_enabled, command=self._toggle_virtual).grid(row=0, column=0, sticky="w", padx=8, pady=6)
+        ttk.Label(vr, text="Virtuelles Display:").grid(row=1, column=0, sticky="w", padx=8)
+        self.entry_vdisp = ttk.Entry(vr, textvariable=self.virt_disp, width=8)
+        self.entry_vdisp.grid(row=1, column=1, sticky="w")
+        ttk.Label(vr, text="Auflösung:").grid(row=1, column=2, sticky="w", padx=(16,0))
+        ttk.Entry(vr, textvariable=self.virt_res, width=12).grid(row=1, column=3, sticky="w")
+        ttk.Checkbutton(vr, text="Openbox starten (Fenster-Manager)", variable=self.virt_wm).grid(row=1, column=4, sticky="w", padx=(16,0))
+
+        btns = ttk.Frame(self); btns.pack(fill="x", padx=10, pady=(0,8))
         self.start_btn = ttk.Button(btns, text="Start", command=self.on_start)
         self.stop_btn  = ttk.Button(btns, text="Stop", command=self.on_stop, state="disabled")
-        self.start_btn.grid(row=0, column=0, padx=(0,6)); self.stop_btn.grid(row=0, column=1)
+        self.start_btn.pack(side="left"); self.stop_btn.pack(side="left", padx=(8,0))
 
-        self.txt = tk.Text(self, height=20, wrap="word")
+        self.txt = tk.Text(self, height=18, wrap="word")
         self.txt.pack(fill="both", expand=True, padx=10, pady=10)
-        self.txt.insert("end", "Bereit. 'Start' beginnt den Stream (direct).\n")
+        self.txt.insert("end", "Bereit. 'Start' beginnt den Stream (direct).")
 
+        self._toggle_virtual()
         self.after(100, self._drain)
+
+    def _toggle_virtual(self):
+        use = self.virt_enabled.get()
+        state = "disabled" if use else "normal"
+        self.entry_disp.config(state=state)
+        # virtual inputs enabled when using virt
+        for w in (self.entry_vdisp,):
+            w.config(state="normal" if use else "disabled")
 
     def _cmdline(self):
         args = [sys.executable, CAST_STREAM,
@@ -162,6 +212,10 @@ class App(tk.Tk):
                 "--save-config"]
         if self.name.get(): args += ["--device", self.name.get()]
         if self.ip.get():   args += ["--ip", self.ip.get()]
+        if self.virt_enabled.get():
+            args += ["--virtual", "--virtual-res", self.virt_res.get()]
+            if self.virt_disp.get(): args += ["--virtual-display", self.virt_disp.get()]
+            if self.virt_wm.get():   args += ["--virtual-wm"]
         return args
 
     def _reader(self, pipe):
@@ -174,6 +228,11 @@ class App(tk.Tk):
         if self.proc: return
         if not os.path.exists(CAST_STREAM):
             messagebox.showerror("Fehlt", f"{CAST_STREAM} nicht gefunden."); return
+
+        # Basic checks
+        if not self.virt_enabled.get() and not validate_display(self.disp.get()):
+            if messagebox.askyesno("Display prüfen", f"Display '{self.disp.get()}' ist evtl. nicht erreichbar. Trotzdem starten (oder 'Virtuellen Monitor' aktivieren)?") is False:
+                return
 
         # Save config first
         save_cfg({
@@ -190,10 +249,14 @@ class App(tk.Tk):
             "gop": self.gop.get(),
             "fflog": self.fflog.get(),
             "sink": self.sink.get(),
+            "virt_enabled": self.virt_enabled.get(),
+            "virt_res": self.virt_res.get(),
+            "virt_disp": self.virt_disp.get(),
+            "virt_wm": self.virt_wm.get(),
         })
 
         args = self._cmdline()
-        self.txt.insert("end", "$ " + " ".join(args) + "\n"); self.txt.see("end")
+        self.txt.insert("end", "$ " + " ".join(args) + ""); self.txt.see("end")
         try:
             self.proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         except Exception as e:
@@ -209,7 +272,7 @@ class App(tk.Tk):
         self.proc = None
         self.start_btn.config(state="normal")
         self.stop_btn.config(state="disabled")
-        self.txt.insert("end", "Gestoppt.\n"); self.txt.see("end")
+        self.txt.insert("end", "Gestoppt."); self.txt.see("end")
 
     def _drain(self):
         try:

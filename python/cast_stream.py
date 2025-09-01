@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-cast_stream.py — Chromecast desktop streaming (direct / wait)
-Now with config support:
-  Priority: CLI flags > ~/.config/chromecast-streamer/config.ini > ./config.local.ini > defaults
-"""
+cast_stream.py — Chromecast desktop streaming (direct / wait) with Virtual Display (Xephyr)
 
-import argparse, os, sys, time, json, socket, signal, subprocess, threading, configparser
+Features:
+- Config-aware (reads ~/.config/chromecast-streamer/config.ini)
+- Robust Chromecast selection by IP or friendly name (fallback to discovery)
+- Wayland/Xorg hinting and DISPLAY validation
+- Optional Virtual Display via Xephyr (auto pick free :N), optional Openbox
+- Clean cleanup (FFmpeg, PulseAudio sink, receiver app, Xephyr/Openbox)
+"""
+import argparse, os, sys, time, json, socket, signal, subprocess, threading, configparser, shutil
 from typing import Optional, Tuple, List
 
 try:
@@ -35,10 +39,13 @@ ffmpeg_proc    = None
 pa_module_idx  = None
 original_sink  = None
 cast_obj       = None
+xephyr_proc    = None
+wm_proc        = None
+virtual_disp   = None
 
 def cleanup(_sig=None, _frm=None):
-    """Gracefully stop FFmpeg, restore audio, quit receiver."""
-    global ffmpeg_proc, original_sink, pa_module_idx, cast_obj
+    """Gracefully stop FFmpeg, restore audio, quit receiver, stop Xephyr/WM."""
+    global ffmpeg_proc, original_sink, pa_module_idx, cast_obj, xephyr_proc, wm_proc
     try:
         if ffmpeg_proc and ffmpeg_proc.poll() is None:
             ffmpeg_proc.terminate()
@@ -53,6 +60,14 @@ def cleanup(_sig=None, _frm=None):
         if cast_obj:
             try: cast_obj.quit_app()
             except Exception: pass
+        if wm_proc and wm_proc.poll() is None:
+            wm_proc.terminate()
+            try: wm_proc.wait(3)
+            except subprocess.TimeoutExpired: wm_proc.kill()
+        if xephyr_proc and xephyr_proc.poll() is None:
+            xephyr_proc.terminate()
+            try: xephyr_proc.wait(3)
+            except subprocess.TimeoutExpired: xephyr_proc.kill()
     finally:
         sys.exit(0)
 
@@ -77,9 +92,22 @@ def cfg_getint(cfg, section, key, default=None):
     except Exception:
         return default
 
-def ensure_user_config_dir():
-    d = os.path.dirname(CONFIG_USER)
-    os.makedirs(d, exist_ok=True)
+# ---------- Checks ----------
+def validate_display(disp: str) -> bool:
+    """Try xdpyinfo to validate a display; if not present, best-effort True."""
+    if not disp:
+        return False
+    if shutil.which("xdpyinfo") is None:
+        return True  # can't validate; don't block
+    try:
+        r = subprocess.run(["xdpyinfo", "-display", disp],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+def is_wayland() -> bool:
+    return os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
 
 # ---------- PulseAudio ----------
 def get_default_sink() -> Optional[str]:
@@ -157,25 +185,62 @@ def cc_friendly_name(c) -> str:
         or "Chromecast"
     )
 
-def find_chromecast(name_substr: Optional[str], ip: Optional[str]) -> "pychromecast.Chromecast":
-    chromecasts, _ = pychromecast.get_chromecasts()
-    if not chromecasts:
-        print("No Chromecast found on the network.", file=sys.stderr); cleanup()
-    if ip:
-        for c in chromecasts:
-            host = getattr(c, "host", None) or c.socket_client.host
-            if host == ip: return c
-        print(f"No Chromecast with IP {ip} found.", file=sys.stderr); cleanup()
-    if name_substr:
-        for c in chromecasts:
-            if name_substr.lower() in cc_friendly_name(c).lower(): return c
-        print(f"No Chromecast with name containing '{name_substr}' found.", file=sys.stderr); cleanup()
-    return chromecasts[0]
-
 def host_port(cast) -> Tuple[str,int]:
     host = getattr(cast, "host", None) or cast.socket_client.host
     port = getattr(cast, "port", None) or cast.socket_client.port
     return host, int(port)
+
+def list_discovered(chromecasts: List["pychromecast.Chromecast"]) -> List[Tuple[str,str]]:
+    out = []
+    for c in chromecasts:
+        try:
+            h = getattr(c, "host", None) or c.socket_client.host
+            nm = cc_friendly_name(c)
+            out.append((nm, h))
+        except Exception:
+            pass
+    return out
+
+def connect_by_ip(ip: str) -> Optional["pychromecast.Chromecast"]:
+    try:
+        c = pychromecast.Chromecast(ip)  # direct connect, no mDNS
+        c.wait()
+        return c
+    except Exception as e:
+        print(f"⚠️  Direct connect to {ip} failed: {e}")
+        return None
+
+def find_chromecast(name_substr: Optional[str], ip: Optional[str]) -> "pychromecast.Chromecast":
+    """Best-effort selection with fallbacks and diagnostics."""
+    # 1) If IP provided, try direct connect first (fast path)
+    if ip:
+        c = connect_by_ip(ip)
+        if c:
+            print(f"✅ Using Chromecast by IP: {ip} ({cc_friendly_name(c)})")
+            return c
+        else:
+            print(f"⚠️  No Chromecast reachable at IP {ip}. Falling back to discovery…")
+
+    # 2) mDNS discovery
+    chromecasts, _ = pychromecast.get_chromecasts()
+    if not chromecasts:
+        print("❌ No Chromecast found on the network.", file=sys.stderr)
+        cleanup()
+
+    print("🔎 Discovered devices:")
+    for nm, h in list_discovered(chromecasts):
+        print(f"   • {nm} @ {h}")
+
+    # 3) If name requested, try to match
+    if name_substr:
+        for c in chromecasts:
+            if name_substr.lower() in cc_friendly_name(c).lower():
+                print(f"✅ Using Chromecast by name: {cc_friendly_name(c)}")
+                return c
+        print(f"⚠️  No Chromecast with name containing '{name_substr}' found. Using first discovered.")
+
+    # 4) Fallback
+    return chromecasts[0]
 
 def local_ip_for(remote_host: str, remote_port: int) -> str:
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -213,6 +278,47 @@ class WaitController(BaseController):
             self.event.set(); return True
         return False
 
+# ---------- Virtual display (Xephyr) ----------
+def pick_free_display(start: int = 2, end: int = 9) -> str:
+    for n in range(start, end+1):
+        path = f"/tmp/.X11-unix/X{n}"
+        if not os.path.exists(path):
+            return f":{n}"
+    return f":{end+1}"
+
+def wait_for_display(disp: str, timeout: float = 5.0) -> bool:
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        if validate_display(disp):
+            return True
+        time.sleep(0.2)
+    return False
+
+def start_virtual_display(res: str, disp: Optional[str] = None, with_wm: bool = True) -> str:
+    global xephyr_proc, wm_proc, virtual_disp
+    if shutil.which("Xephyr") is None:
+        print("❌ Xephyr not installed. Install with: sudo apt install xserver-xephyr", file=sys.stderr)
+        sys.exit(1)
+    if with_wm and shutil.which("openbox") is None:
+        print("⚠️  openbox not installed. You can still run without WM, or install with:", file=sys.stderr)
+        print("    sudo apt install openbox", file=sys.stderr)
+        with_wm = False
+    virtual_disp = disp if disp and disp.lower() != "auto" else pick_free_display()
+    print(f"🖥️  Starting virtual display {virtual_disp} @ {res} …")
+    xephyr_proc = subprocess.Popen(["Xephyr", virtual_disp, "-screen", res, "-title", "Cast-Virtual", "-resizeable"],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if not wait_for_display(virtual_disp, 6.0):
+        print("❌ Xephyr did not come up in time.", file=sys.stderr)
+        cleanup()
+
+    if with_wm:
+        env = os.environ.copy(); env["DISPLAY"] = virtual_disp
+        wm_proc = subprocess.Popen(["openbox"], env=env,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(0.5)
+    print("   Virtual display ready.")
+    return virtual_disp
+
 # ---------- Main ----------
 def main():
     global ffmpeg_proc, cast_obj
@@ -221,7 +327,6 @@ def main():
         description="Cast your Linux desktop to Chromecast (direct or wait for receiver UI).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    # defaults = None, so config can fill them
     ap.add_argument("--mode", choices=["direct","wait"], default=None)
     ap.add_argument("--app-id", default=None)
     ap.add_argument("--ns", default=None)
@@ -235,6 +340,11 @@ def main():
     ap.add_argument("--hw", choices=["auto","vaapi","cuda","qsv","software"], default=None)
     ap.add_argument("--sink-name", default=None)
     ap.add_argument("--fflog", default=None)
+    # Virtual display flags
+    ap.add_argument("--virtual", action="store_true", help="Start a virtual X screen via Xephyr and capture that")
+    ap.add_argument("--virtual-res", default="3840x2160")
+    ap.add_argument("--virtual-display", default="auto")
+    ap.add_argument("--virtual-wm", action="store_true", help="Start openbox inside the virtual display")
     ap.add_argument("--config", help="Optional config path to read")
     ap.add_argument("--save-config", action="store_true", help="Persist current effective settings to ~/.config/chromecast-streamer/config.ini")
     args = ap.parse_args()
@@ -256,11 +366,19 @@ def main():
     hw          = args.hw          or cfg_get(cfg, "stream","hw",          "auto")
     sink        = args.sink_name   or cfg_get(cfg, "stream","sink_name",   DEF_SINK_NAME)
     fflog       = args.fflog       or cfg_get(cfg, "stream","fflog",       DEF_FFLOG)
+    # virtual
+    virt        = args.virtual     or (cfg_get(cfg,"virtual","enabled","false").lower() == "true")
+    virt_res    = args.virtual_res or cfg_get(cfg,"virtual","resolution","3840x2160")
+    virt_disp   = args.virtual_display or cfg_get(cfg,"virtual","display","auto")
+    virt_wm     = args.virtual_wm or (cfg_get(cfg,"virtual","wm","true").lower() == "true")
+
+    # Wayland hint
+    if is_wayland() and not virt:
+        print("ℹ️  Wayland session detected. x11grab works in Xorg, or enable --virtual to use Xephyr.")
 
     # Optionally persist resolved settings to user config
     if args.save_config:
-        d = os.path.dirname(CONFIG_USER)
-        os.makedirs(d, exist_ok=True)
+        os.makedirs(os.path.dirname(CONFIG_USER), exist_ok=True)
         out = configparser.ConfigParser()
         out["cast"] = {
             "app_id": app_id,
@@ -279,6 +397,12 @@ def main():
             "sink_name": sink,
             "mode": mode,
         }
+        out["virtual"] = {
+            "enabled": str(virt),
+            "resolution": virt_res,
+            "display": virt_disp,
+            "wm": str(virt_wm),
+        }
         with open(CONFIG_USER, "w") as f:
             out.write(f)
         print(f"Saved config → {CONFIG_USER}")
@@ -287,7 +411,8 @@ def main():
     cast = find_chromecast(device, ip)
     cast.wait()
     cast_obj = cast
-    host, cport = host_port(cast)
+    host = getattr(cast, "host", None) or cast.socket_client.host
+    cport = getattr(cast, "port", None) or cast.socket_client.port
     print(f"Chromecast: {cc_friendly_name(cast)} @ {host}:{cport}")
 
     if app_id:
@@ -300,6 +425,15 @@ def main():
         print("Waiting for 'start' from receiver …")
         ctrl.event.wait()
         print("Receiver requested streaming.")
+
+    # Virtual display handling
+    if virt:
+        disp = start_virtual_display(virt_res, virt_disp, with_wm=virt_wm)
+        print(f"👉 Start apps inside the virtual screen with: DISPLAY={disp} <app> &")
+
+    # Validate the chosen display (best effort)
+    if not validate_display(disp):
+        print(f"⚠️  Display '{disp}' might not be accessible. If this fails, try --virtual.", file=sys.stderr)
 
     print("Setting up PulseAudio null sink …")
     audio_src = setup_null_sink(sink)
