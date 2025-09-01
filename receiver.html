@@ -76,7 +76,7 @@ mgr.setPlaybackConfig({autoResumeNumberOfSegments:1});ctx.start();const bus=ctx.
 const btns=[$('#btn-stream'),$('#btn-info'),$('#btn-time')];let sel=0,timer=null;
 function selBtn(i){btns.forEach(b=>b.classList.remove('sel'));sel=(i+btns.length)%btns.length;btns[sel].classList.add('sel');btns[sel].focus()}
 function press(b){b.classList.add('pressed');setTimeout(()=>b.classList.remove('pressed'),150)}
-btns[0].onclick=()=>{press(btns[0]);splash.style.display='none';about.parentNode.style.display='none';bus.send({type:'start'})};
+btns[0].onclick=()=>{press(btns[0]);splash.style.display='none';about.parentNode.style.display='none';bus.broadcast(JSON.stringify({type:'start'}))};
 btns[1].onclick=()=>{press(btns[1]);clearInterval(timer);about.innerHTML='<h1>Hi&nbsp;Linda – selbstgebauter Player 🎵</h1><p>Liebe Grüße, Christoph</p>'};
 btns[2].onclick=()=>{press(btns[2]);updateTime();clearInterval(timer);timer=setInterval(updateTime,1000)};
 function updateTime(){const d=new Date();about.innerHTML=`<h1>${d.toLocaleTimeString()}</h1><p>${d.toLocaleDateString()}</p>`}
