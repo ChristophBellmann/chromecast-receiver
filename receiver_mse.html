@@ -1,0 +1,256 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Chromecast MSE Receiver</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+  <style>
+    html,body {height:100%; margin:0; background:#000; color:#eee; font-family:system-ui, sans-serif;}
+    #overlay {position:absolute; left:0; right:0; top:0; padding:12px; font-size:14px; color:#ccc; pointer-events:none;}
+    #video {width:100%; height:100%; object-fit:contain; background:#000;}
+  </style>
+</head>
+<body>
+  <div id="overlay">Warte auf URL …</div>
+  <video id="video" autoplay playsinline muted></video>
+
+  <script>
+  (function(){
+    const context = cast.framework.CastReceiverContext.getInstance();
+    const bus = context.getCastMessageBus('urn:x-cast:com.example.stream'); // gleich wie Sender
+    const overlay = document.getElementById('overlay');
+    const video = document.getElementById('video');
+
+    // ---- MSE state ----
+    let mediaSource = null;
+    let sourceBuffer = null;
+    let reader = null;
+    let segQueue = [];   // Uint8Array queued
+    let appending = false;
+    let closed = false;
+
+    const TARGET_LATENCY = 2.5; // Sekunden live edge
+    const MAX_BUFFER = 15;      // Sekunden – ältere Daten trimmen
+    const CODEC_CANDIDATES = [
+      'video/mp4; codecs="avc1.640028, mp4a.40.2"',
+      'video/mp4; codecs="avc1.4D4028, mp4a.40.2"',
+      'video/mp4; codecs="avc1.42E01E, mp4a.40.2"',
+      'video/mp4; codecs="avc1.64001F, mp4a.40.2"',
+    ];
+
+    function log(t){
+      console.log('[MSE]', t);
+      overlay.textContent = t;
+    }
+
+    function chooseCodec(){
+      for(const c of CODEC_CANDIDATES){
+        if (MediaSource.isTypeSupported(c)) return c;
+      }
+      return null;
+    }
+
+    function abortMSE(){
+      try { if (reader) reader.cancel(); } catch(e){}
+      reader = null;
+      try { if (sourceBuffer) sourceBuffer.abort(); } catch(e){}
+      try { if (mediaSource && mediaSource.readyState === 'open') mediaSource.endOfStream(); } catch(e){}
+      sourceBuffer = null;
+      mediaSource = null;
+      segQueue = [];
+      appending = false;
+      closed = true;
+    }
+
+    function startMSE(url){
+      abortMSE();
+      closed = false;
+
+      const type = chooseCodec();
+      if (!type) {
+        log('Kein passender Codec gefunden (MSE).');
+        return;
+      }
+      log('Verbinde …');
+
+      mediaSource = new MediaSource();
+      video.src = URL.createObjectURL(mediaSource);
+
+      mediaSource.addEventListener('sourceopen', async () => {
+        try {
+          sourceBuffer = mediaSource.addSourceBuffer(type);
+          sourceBuffer.mode = 'segments';
+          sourceBuffer.addEventListener('updateend', _appendNext);
+
+          const resp = await fetch(url, {cache:'no-store', mode:'cors'});
+          if (!resp.ok || !resp.body) throw new Error('HTTP '+resp.status);
+
+          reader = resp.body.getReader();
+
+          // Stream-Parser: init (ftyp+moov) bis 1. moof, danach Segmente [moof..nächste moof)
+          let buf = new Uint8Array(0);
+          let gotInit = false;
+
+          while (true){
+            const {done, value} = await reader.read();
+            if (done) break;
+            if (closed) return;
+
+            // concat
+            const tmp = new Uint8Array(buf.length + value.length);
+            tmp.set(buf,0); tmp.set(value,buf.length);
+            buf = tmp;
+
+            const moofIdxs = findAllMoof(buf);
+            if (!gotInit) {
+              if (moofIdxs.length > 0) {
+                const firstMoof = moofIdxs[0];
+                const init = buf.slice(0, firstMoof);
+                enqueue(init);
+                gotInit = true;
+                buf = buf.slice(firstMoof);
+              } else {
+                // noch nicht genug Daten – weiter lesen
+                continue;
+              }
+            }
+
+            // jetzt Segmente zwischen moof-Grenzen
+            const segIdxs = findAllMoof(buf);
+            while (segIdxs.length >= 2) {
+              const start = segIdxs[0];
+              const next  = segIdxs[1];
+              const seg = buf.slice(start, next);
+              enqueue(seg);
+              buf = buf.slice(next);
+              segIdxs.shift();
+            }
+
+            // live edge anstreben
+            maybeNudgeLiveEdge();
+            maybeTrimOld();
+          }
+
+          // Stream zuende
+          if (mediaSource && mediaSource.readyState === 'open') {
+            try { mediaSource.endOfStream(); } catch(e){}
+          }
+          log('Stream beendet.');
+        } catch (e) {
+          console.error(e);
+          log('MSE Fehler: ' + e.message);
+        }
+      });
+    }
+
+    // Suche alle 'moof' Boxen
+    function findAllMoof(u8){
+      const out = [];
+      for (let i=0; i+8<=u8.length; i++){
+        // Box header: size(4) type(4)
+        if (u8[i+4]===0x6D && u8[i+5]===0x6F && u8[i+6]===0x6F && u8[i+7]===0x66){ // 'moof'
+          out.push(i);
+        }
+      }
+      return out;
+    }
+
+    function enqueue(u8){
+      if (!u8 || u8.length===0) return;
+      segQueue.push(u8);
+      _appendNext();
+    }
+
+    function _appendNext(){
+      if (!sourceBuffer || appending || segQueue.length===0) return;
+      if (sourceBuffer.updating) return;
+
+      const seg = segQueue.shift();
+      appending = true;
+      try {
+        sourceBuffer.appendBuffer(seg);
+      } catch (e) {
+        console.warn('appendBuffer failed, retry later', e);
+        // kleinen Backoff und erneut probieren
+        setTimeout(()=>{ appending=false; _appendNext(); }, 50);
+        return;
+      }
+      appending = false;
+    }
+
+    function maybeNudgeLiveEdge(){
+      try{
+        if (video.readyState < 2 || !video.buffered || video.buffered.length===0) return;
+        const end = video.buffered.end(video.buffered.length-1);
+        const target = end - TARGET_LATENCY;
+        if (isFinite(target)) {
+          // Nur springen, wenn wir deutlich hinterher sind (>1s Differenz)
+          if (!isFinite(video.currentTime) || (end - video.currentTime) > (TARGET_LATENCY + 1.0)) {
+            video.currentTime = target;
+          }
+        }
+      }catch(e){}
+    }
+
+    function maybeTrimOld(){
+      try{
+        if (!sourceBuffer || !video.buffered || video.buffered.length===0) return;
+        const start = video.buffered.start(0);
+        const end   = video.buffered.end(video.buffered.length-1);
+        const span  = end - start;
+        if (span > MAX_BUFFER) {
+          const safe = Math.max(0, end - MAX_BUFFER);
+          if (!sourceBuffer.updating) {
+            sourceBuffer.remove(0, safe);
+          }
+        }
+      }catch(e){}
+    }
+
+    // Cast message handling
+    bus.onMessage = (event) => {
+      let data = event.data;
+      let url = null;
+      try {
+        // JSON oder plain
+        if (typeof data === 'string' && data.startsWith('http')) {
+          url = data.trim();
+        } else if (typeof data === 'string') {
+          const obj = JSON.parse(data);
+          url = obj.url || obj.streamUrl || null;
+        } else if (typeof data === 'object' && data) {
+          url = data.url || data.streamUrl || null;
+        }
+      } catch(e){}
+
+      if (!url) {
+        log('Ungültige Nachricht erhalten.');
+        return;
+      }
+
+      log('URL empfangen – starte MSE …');
+      startMSE(url);
+    };
+
+    context.start();
+
+    // HUD aktualisieren
+    setInterval(()=>{
+      try{
+        if (video.buffered && video.buffered.length){
+          const end = video.buffered.end(video.buffered.length-1);
+          const liveLag = (end - video.currentTime).toFixed(1);
+          overlay.textContent = `Live-Lag ~${liveLag}s`;
+        }
+      }catch(e){}
+    }, 500);
+
+    // Autoplay/Mute-Handling auf Chromecast ist unkritisch, aber sicherheitshalber:
+    video.muted = true;
+    video.play().catch(()=>{});
+  })();
+  </script>
+</body>
+</html>
+
