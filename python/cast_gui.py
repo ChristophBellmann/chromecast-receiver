@@ -151,7 +151,7 @@ def resolve_vlc_cmd():
     if which("vlc"): return (["vlc"], None)
     if has_flatpak("org.videolan.VLC"): return (["flatpak","run","org.videolan.VLC"], None)
     if has_snap("vlc"): return (["snap","run","vlc"], None)
-    return (None, "VLC nicht gefunden. Installiere z.B.:\n  sudo apt install vlc\n  snap install vlc\n  flatpak install flathub org.videolan.VLC")
+    return (None, "VLC nicht gefunden. Installiere z.B.:\n  sudo apt install vlc\n  snap install flathub org.videolan.VLC")
 
 # ----------------------------- GUI -----------------------------
 class App(tk.Tk):
@@ -164,8 +164,9 @@ class App(tk.Tk):
         self.runtime_virtual_display = None
         self._pending_restart = False
         self._pending_restart_reason = None
+        self._is_stopping = False
+        self._last_path_summary = None
         self._build_ui()
-        # >>> fehlende Methode war hier aufgerufen:
         self.after(120, self._drain)
 
     # ---------- UI ----------
@@ -301,6 +302,12 @@ class App(tk.Tk):
     def _set_status(self, s):
         self.status.set(s)
 
+    def _maybe_status(self, s):
+        """Nur Status setzen, wenn wir nicht gerade stoppen/neustarten."""
+        if self._is_stopping or self._pending_restart:
+            return
+        self._set_status(s)
+
     def _log(self, s):
         self.txt.insert("end", s + ("\n" if not s.endswith("\n") else ""))
         self.txt.see("end")
@@ -347,16 +354,49 @@ class App(tk.Tk):
         m = re.search(r"DISPLAY=(:\d+)", line)
         if m:
             self.runtime_virtual_display = m.group(1)
-        if "Streaming started" in line:
-            self._set_status("streamt …")
-        if line.strip().startswith("--- cleanup done"):
-            self._set_status("gestoppt")
-        if line.strip().startswith("--- Path Check"):
-            self._set_status("prüfe Pfad …")
 
-    # ---------- Queue-Drain (fix) ----------
+        s = line.strip()
+
+        # feingranulare Status-Phasen
+        if "Output #0, mp4" in s or "Press [q] to stop" in s:
+            self._maybe_status("Encoder läuft …")
+        elif "Discovering Chromecast" in s:
+            self._maybe_status("suche Chromecast …")
+        elif s.startswith("✓ Chromecast"):
+            self._maybe_status("Chromecast gefunden …")
+        elif "Launching receiver app" in s:
+            self._maybe_status("Receiver-App starten …")
+        elif "Receiver app launched" in s:
+            self._maybe_status("Receiver bereit …")
+        elif s.startswith("Stream URL:"):
+            self._maybe_status("warte Chromecast-Verbindung …")
+        elif s.startswith("--- Path Check"):
+            self._maybe_status("prüfe Pfad …")
+
+        # Path-Check-Zusammenfassung für (LAN)/(Internet)
+        if "→" in s:
+            self._last_path_summary = s
+
+        if "Streaming started" in s:
+            tag = ""
+            if self._last_path_summary:
+                txt = self._last_path_summary
+                if "LAN/WLAN" in txt:
+                    tag = " (LAN)"
+                elif "Internet" in txt:
+                    tag = " (Internet)"
+            self._maybe_status("streamt" + tag)
+
+        # Cleanup-Ende -> Status in _on_process_end
+        if s.startswith("--- cleanup done"):
+            return
+
+        # während Stop: keine Statusänderung (Logs zeigen wir weiter an)
+        if s.startswith("--- Path Check") and self._is_stopping:
+            return
+
+    # ---------- Queue-Drain ----------
     def _drain(self):
-        """Periodisch Ausgaben aus der Reader-Queue ins Textfeld schreiben."""
         try:
             while True:
                 s = self.q.get_nowait()
@@ -364,7 +404,6 @@ class App(tk.Tk):
                 self._log(s.rstrip("\n"))
         except queue.Empty:
             pass
-        # weiter pollen
         self.after(120, self._drain)
 
     # ---------- Reader/Watcher ----------
@@ -387,9 +426,9 @@ class App(tk.Tk):
         self.start_btn.config(state="normal")
         self.stop_btn.config(state="disabled")
         if not self._pending_restart:
+            self._is_stopping = False
             self._set_status("bereit")
         self._log("Prozess beendet.")
-        # geplanter Neustart?
         if self._pending_restart:
             why = self._pending_restart_reason or "Neustart"
             self._pending_restart = False
@@ -439,31 +478,44 @@ class App(tk.Tk):
         self._save_all_cfg()
 
         self.runtime_virtual_display = None
+        self._last_path_summary = None
+        self._is_stopping = False
+
         args = self._cmdline()
         self._log("$ " + " ".join(args))
         try:
-            # eigene Prozessgruppe, damit wir ffmpeg & Kinder sicher killen
-            self.proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, preexec_fn=os.setsid)
+            self.proc = subprocess.Popen(
+                args,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                preexec_fn=os.setsid
+            )
         except Exception as e:
             messagebox.showerror("Fehler", str(e)); self.proc=None; return
         self.start_btn.config(state="disabled")
         self.stop_btn.config(state="normal")
-        self._set_status("prüfe Pfad …")
+        self._set_status("startet …")
+
+        # kleiner Nudge: falls nach 2s noch "startet …", Fortschritt signalisieren
+        def _nudge():
+            if self.proc and self.status.get().startswith("startet"):
+                self._maybe_status("initialisiert …")
+        self.after(2000, _nudge)
 
         threading.Thread(target=self._reader, args=(self.proc.stdout,), daemon=True).start()
         threading.Thread(target=self._watch_proc, args=(self.proc,), daemon=True).start()
 
     def on_stop(self, reason="Stop"):
         if not self.proc: return
+        self._is_stopping = True
+        self._set_status("stoppt …")
         self._log(f"Stoppe Stream … ({reason})")
         try:
-            # Erst SIGINT an komplette Gruppe
             os.killpg(os.getpgid(self.proc.pid), signal.SIGINT)
         except Exception:
             try: self.proc.terminate()
             except Exception: pass
 
-        # kleine Wartezeit, danach ggf. härter beenden
         def _ensure_dead():
             if self.proc and self.proc.poll() is None:
                 try:
@@ -473,7 +525,7 @@ class App(tk.Tk):
                     except Exception: pass
         self.after(1800, _ensure_dead)
 
-    # ---------- Latency change triggers quick restart ----------
+    # ---------- Latency quick restart ----------
     def _on_latency_changed(self, _evt=None):
         self._save_all_cfg()
         if self.proc:
