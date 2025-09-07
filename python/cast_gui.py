@@ -408,14 +408,15 @@ class App(tk.Tk):
 
     # ---------- Reader/Watcher ----------
     def _reader(self, pipe):
-        for line in iter(pipe.readline, b""):
+        for line in iter(pipe.readline, ""):
             try:
-                s = line.decode(errors="replace")
-                self.q.put(s)
+                self.q.put(line)
             except Exception:
                 pass
-        try: pipe.close()
-        except Exception: pass
+        try:
+            pipe.close()
+        except Exception:
+            pass
 
     def _watch_proc(self, p):
         p.wait()
@@ -488,6 +489,9 @@ class App(tk.Tk):
                 args,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
                 preexec_fn=os.setsid
             )
         except Exception as e:

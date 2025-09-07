@@ -212,11 +212,14 @@ def build_ffmpeg_cmd(display, size, fps, hw, gop_s, port, loglevel, sink_name, l
 
     cmd = [
         "ffmpeg", "-hide_banner", "-loglevel", loglevel,
+        # reduce frame duplication / buffering for live x11grab
+        "-rtbufsize", "100M",
         # X11 (Video)
-        "-re",
+        # NOTE: do NOT use -re for live capture; it causes timing/dup issues
         *in_flags,
         "-f","x11grab","-framerate", str(fps),
         "-video_size", f"{W}x{H}", "-i", display,
+        "-vsync", "0",
         # Pulse (Audio)
         "-thread_queue_size","1024",
         "-f","pulse","-i", f"{sink_name}.monitor",
