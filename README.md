@@ -1,8 +1,8 @@
 # Chromecast Receiver & Desktop Streamer
 
-> Streamt deinen Linux-Desktop **direkt** auf  Chromecast
-> Modus (**direct**):Bildschirm gespiegelt
-> Modus (**wait**): Läd ein Webinterface auf dem Receiver.
+> Streamt den Desktop oder einen virtuellen Bildschirm auf Chromecast  
+> Modus (**direct**):Bildschirm gespiegelt  
+> Modus (**wait**): Läd ein Webinterface auf dem Receiver.  
 
 [![Developer Setup Guide](https://img.shields.io/badge/Docs-Developer%20Setup%20Guide-0A84FF?logo=google-chrome&logoColor=white)](./docs/DEV_SETUP.md)
 ![Status](https://img.shields.io/badge/OS-Pop!_OS%20%7C%20Ubuntu-blue)
@@ -16,9 +16,9 @@
 
 ## ✨ Features
 
-- **Ein Tool** (`python/cast_stream.py`) für beide Modi:
-  - **direct**: startet sofort
-  - **wait**: zeigt zuerst deine `receiver.html` (Intro/Buttons), Stream beginnt nach „Stream“-Klick
+- **Ein Tool** (`python/cast_stream.py`) für beide Modi:  
+  - **direct**: startet sofort  
+  - **wait**: zeigt zuerst deine `receiver.html` (Intro/Buttons), Stream beginnt nach „Stream“-Klick  
 - **Auto-Encoder** (VAAPI / NVENC / QSV) mit Fallback auf Software (x264)
 - **Kontrolle via Flags** (Auflösung, FPS, Port, Gerät, Loglevel, …)
 - **GUI inklusive** (`python/cast_gui.py`) – Start/Stop
