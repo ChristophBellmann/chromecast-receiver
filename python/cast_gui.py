@@ -60,7 +60,8 @@ def load_cfg():
         "virt_res":     geti(v, "resolution", "3840x2160"),
         "virt_disp":    geti(v, "display", "auto"),
         "virt_wm":      geti(v, "wm", "true").lower() == "true",
-        "virt_backend": geti(v, "backend", "auto"),
+    # Prefer Xephyr (visible nested X) when installed, else fall back to xpra/auto
+    "virt_backend": geti(v, "backend", "xephyr" if shutil.which("Xephyr") else ("xpra" if shutil.which("xpra") else "auto")),
         # app launcher
         "app_choice":   geti(v, "app_choice", "none"),
         "app_arg":      geti(v, "app_arg", ""),
@@ -172,33 +173,38 @@ class App(tk.Tk):
     # ---------- UI ----------
     def _build_ui(self):
         d = load_cfg()
-        frm = ttk.Frame(self, padding=10); frm.pack(fill="x")
+        frm = ttk.Frame(self, padding=10)
+        frm.pack(fill="x")
 
+        # basic fields
         self.mode = tk.StringVar(value=d["mode"])
         self.appid = tk.StringVar(value=d["app_id"])
-        self.ns    = tk.StringVar(value=d["namespace"])
-        self.name  = tk.StringVar(value=d["device"])
-        self.ip    = tk.StringVar(value=d["ip"])
-        self.res   = tk.StringVar(value=d["resolution"])
-        self.fps   = tk.IntVar(value=d["fps"])
-        self.hw    = tk.StringVar(value=d["hw"])
-        self.port  = tk.IntVar(value=d["port"])
-        self.disp  = tk.StringVar(value=d["display"])
-        self.gop   = tk.DoubleVar(value=d["gop"])
+        self.ns = tk.StringVar(value=d["namespace"])
+        self.name = tk.StringVar(value=d["device"])
+        self.ip = tk.StringVar(value=d["ip"])
+        self.res = tk.StringVar(value=d["resolution"])
+        self.fps = tk.IntVar(value=d["fps"])
+        self.hw = tk.StringVar(value=d["hw"])
+        self.port = tk.IntVar(value=d["port"])
+        self.disp = tk.StringVar(value=d["display"])
+        self.gop = tk.DoubleVar(value=d["gop"])
         self.fflog = tk.StringVar(value=d["fflog"])
-        self.sink  = tk.StringVar(value=d["sink"])
+        self.sink = tk.StringVar(value=d["sink"])
         self.latency = tk.StringVar(value=d["latency"])
+
         # virtual
         self.virt_enabled = tk.BooleanVar(value=d["virt_enabled"])
-        self.virt_res     = tk.StringVar(value=d["virt_res"])
-        self.virt_disp    = tk.StringVar(value=d["virt_disp"])
-        self.virt_wm      = tk.BooleanVar(value=d["virt_wm"])
+        self.virt_res = tk.StringVar(value=d["virt_res"])
+        self.virt_disp = tk.StringVar(value=d["virt_disp"])
+        self.virt_wm = tk.BooleanVar(value=d["virt_wm"])
         self.virt_backend = tk.StringVar(value=d["virt_backend"])
+
         # app launcher
-        self.app_choice   = tk.StringVar(value=d["app_choice"])
-        self.app_arg      = tk.StringVar(value=d["app_arg"])
+        self.app_choice = tk.StringVar(value=d["app_choice"])
+        self.app_arg = tk.StringVar(value=d["app_arg"])
+
         # net
-        self.lan_only     = tk.BooleanVar(value=d["lan_only"])
+        self.lan_only = tk.BooleanVar(value=d["lan_only"])
         self.vlc_web_auto = tk.BooleanVar(value=d["vlc_web_auto"])
         self.vlc_web_port = tk.IntVar(value=d["vlc_web_port"])
         self.vlc_web_pass = tk.StringVar(value=d["vlc_web_pass"])
@@ -249,14 +255,16 @@ class App(tk.Tk):
         vr.pack(fill="x", padx=10, pady=(8,8))
         ttk.Checkbutton(vr, text="Virtuellen Monitor verwenden", variable=self.virt_enabled, command=self._toggle_virtual).grid(row=0, column=0, sticky="w", padx=8, pady=6)
         ttk.Label(vr, text="Backend:").grid(row=0, column=1, sticky="w")
-        ttk.Combobox(vr, textvariable=self.virt_backend, values=["auto","xephyr","xvfb"], width=8, state="readonly").grid(row=0, column=2, sticky="w")
+        ttk.Combobox(vr, textvariable=self.virt_backend, values=["auto","xpra","xephyr","xvfb"], width=8, state="readonly").grid(row=0, column=2, sticky="w")
         ttk.Button(vr, text="4K-Preset", command=self._set_4k).grid(row=0, column=3, sticky="w", padx=6)
+
         ttk.Label(vr, text="Virtuelles Display:").grid(row=1, column=0, sticky="w", padx=8)
         self.entry_vdisp = ttk.Entry(vr, textvariable=self.virt_disp, width=8)
         self.entry_vdisp.grid(row=1, column=1, sticky="w")
         ttk.Label(vr, text="Auflösung:").grid(row=1, column=2, sticky="w", padx=(16,0))
         ttk.Entry(vr, textvariable=self.virt_res, width=12).grid(row=1, column=3, sticky="w")
         ttk.Checkbutton(vr, text="Openbox starten (Fenster-Manager)", variable=self.virt_wm).grid(row=1, column=4, sticky="w", padx=(16,0))
+        ttk.Button(vr, text="Host-Fenster starten", command=self.on_start_host_window).grid(row=0, column=4, sticky="w", padx=(16,0))
 
         # App Launcher
         al = ttk.LabelFrame(self, text="App im virtuellen Monitor starten (optional)")
@@ -278,13 +286,16 @@ class App(tk.Tk):
         ttk.Label(net, text="Passwort:").grid(row=1, column=3, sticky="e", padx=(12,0))
         ttk.Entry(net, textvariable=self.vlc_web_pass, width=12, show="•").grid(row=1, column=4, sticky="w")
 
-        btns = ttk.Frame(self); btns.pack(fill="x", padx=10, pady=(0,8))
+        btns = ttk.Frame(self)
+        btns.pack(fill="x", padx=10, pady=(0,8))
         self.start_btn = ttk.Button(btns, text="Start", command=self.on_start)
-        self.stop_btn  = ttk.Button(btns, text="Stop", command=lambda: self.on_stop(reason="Stop-Button"), state="disabled")
-        self.start_btn.pack(side="left"); self.stop_btn.pack(side="left", padx=(8,0))
+        self.stop_btn = ttk.Button(btns, text="Stop", command=lambda: self.on_stop(reason="Stop-Button"), state="disabled")
+        self.start_btn.pack(side="left")
+        self.stop_btn.pack(side="left", padx=(8,0))
 
         self.status = tk.StringVar(value="bereit")
-        st = ttk.Frame(self); st.pack(fill="x", padx=10, pady=(0,4))
+        st = ttk.Frame(self)
+        st.pack(fill="x", padx=10, pady=(0,4))
         ttk.Label(st, text="Status:").pack(side="left")
         self.status_lbl = ttk.Label(st, textvariable=self.status)
         self.status_lbl.pack(side="left")
@@ -509,6 +520,69 @@ class App(tk.Tk):
         threading.Thread(target=self._reader, args=(self.proc.stdout,), daemon=True).start()
         threading.Thread(target=self._watch_proc, args=(self.proc,), daemon=True).start()
 
+        # Wenn virtueller Monitor verwendet wird und im Dropdown eine App ausgewählt ist,
+        # automatisch starten, sobald das virtuelle DISPLAY verfügbar ist.
+        if self.virt_enabled.get() and self.app_choice.get() != "none":
+            def _wait_and_autolaunch():
+                # Warte bis runtime_virtual_display gesetzt ist (max ~20s)
+                for _ in range(200):
+                    if self.runtime_virtual_display:
+                        # Launch im GUI-Kontext
+                        self.after(0, self.on_launch_app)
+                        return
+                    time.sleep(0.1)
+                self._log("⚠️  App-Autostart: virtuelles Display nicht rechtzeitig bereit (Timeout).")
+            threading.Thread(target=_wait_and_autolaunch, daemon=True).start()
+
+    # ---------- Host Xephyr helper ----------
+    def on_start_host_window(self):
+        """Starts the helper script that creates a visible Xephyr window on the host.
+        Runs non-blocking and logs output to the GUI text area."""
+        script = os.path.abspath(os.path.join(HERE, "..", "scripts", "start_xephyr_session.sh"))
+        if not os.path.exists(script):
+            messagebox.showerror("Fehlt", f"{script} nicht gefunden. Bitte überprüfe scripts/start_xephyr_session.sh")
+            return
+        # Prefer the runtime display if the streaming process already created one
+        runtime_disp = self.runtime_virtual_display
+        configured = self.virt_disp.get()
+        res = self.virt_res.get()
+
+        def _launch_for_display(disp_to_use):
+            cmd = [script]
+            if disp_to_use:
+                cmd.append(disp_to_use)
+            if res:
+                cmd.append(res)
+            try:
+                subprocess.Popen(cmd)
+                self._log(f"🖥️  Host-Fenster gestartet für {disp_to_use or 'auto'}: {' '.join(cmd)}")
+            except Exception as e:
+                self._log(f"⚠️  Start Host-Fenster fehlgeschlagen: {e}")
+                self.after(0, lambda: messagebox.showerror("Start fehlgeschlagen", str(e)))
+
+        # If a runtime display is already known, launch immediately for that display.
+        if runtime_disp:
+            threading.Thread(target=lambda: _launch_for_display(runtime_disp), daemon=True).start()
+            return
+
+        # If user configured a specific display (not 'auto'), start immediately with that.
+        if configured and configured.lower() != 'auto':
+            threading.Thread(target=lambda: _launch_for_display(configured), daemon=True).start()
+            return
+
+        # Otherwise, wait for the streaming process to announce the runtime display and then launch.
+        def _wait_then_launch():
+            for _ in range(200):
+                if self.runtime_virtual_display:
+                    _launch_for_display(self.runtime_virtual_display)
+                    return
+                time.sleep(0.1)
+            # fallback: launch with auto (script will pick :2)
+            self._log("⚠️  Host-Fenster: runtime display not found within timeout, launching helper in auto mode")
+            _launch_for_display(None)
+
+        threading.Thread(target=_wait_then_launch, daemon=True).start()
+
     def on_stop(self, reason="Stop"):
         if not self.proc: return
         self._is_stopping = True
@@ -575,13 +649,28 @@ class App(tk.Tk):
                 return
             argv = shlex.split(arg)
 
-        env = os.environ.copy()
-        env["DISPLAY"] = disp
-        try:
-            subprocess.Popen(argv, env=env)
-            self._log(f"🚀 Gestartet auf {disp}: {' '.join(argv)}")
-        except Exception as e:
-            messagebox.showerror("Start fehlgeschlagen", str(e))
+        # Launch non-blocking in a thread. Prefer xpra attach with --start-child
+        # so the app appears as a host window (Alt-Tab), falling back to
+        # starting the app directly inside the virtual DISPLAY.
+        def _launch_worker():
+            if which("xpra"):
+                try:
+                    cmd = ["xpra", "attach", disp, "--start-child=" + ' '.join(shlex.quote(a) for a in argv)]
+                    subprocess.Popen(cmd)
+                    self._log(f"🚀 (xpra) Started on {disp}: {' '.join(argv)}")
+                    return
+                except Exception as e:
+                    # fallthrough to direct start
+                    self._log(f"⚠️  xpra attach --start-child failed: {e}")
+            env = os.environ.copy()
+            env["DISPLAY"] = disp
+            try:
+                subprocess.Popen(argv, env=env)
+                self._log(f"🚀 Gestartet auf {disp}: {' '.join(argv)}")
+            except Exception as e:
+                self.after(0, lambda: messagebox.showerror("Start fehlgeschlagen", str(e)))
+
+        threading.Thread(target=_launch_worker, daemon=True).start()
 
 # ----------------------------- Main -----------------------------
 if __name__ == "__main__":

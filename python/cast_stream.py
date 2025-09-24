@@ -12,6 +12,7 @@ und Latenz-Presets.
 - beendet ffmpeg/WM/X-Server sauber bei SIGINT/SIGTERM
 """
 import os, sys, time, socket, signal, subprocess, argparse, shutil, re
+import threading
 import pychromecast
 from pychromecast.error import UnsupportedNamespace
 
@@ -68,7 +69,8 @@ def detect_hwaccel():
     return None
 
 # -------------- Virtual display --------------
-def pick_free_display(start=2, end=98):
+def pick_free_display(start=20, end=98):
+    # avoid very low display numbers which xpra warns about
     for n in range(start, end):
         if not os.path.exists(f"/tmp/.X11-unix/X{n}"):
             return f":{n}"
@@ -85,51 +87,287 @@ def xdpy_size(display):
     return None
 
 def start_virtual(display, res, backend="auto", start_wm=False):
-    """Start Xvfb oder Xephyr. Returns (proc_x, proc_wm, display, actual_size)."""
-    if display == "auto":
-        display = pick_free_display()
-    W,H = map(int, res.lower().split("x"))
+    # res: "WIDTHxHEIGHT", display: ":N" or "auto"
+    W, H = [int(x) for x in str(res).split("x")]
+    virt_proc = None
+    attach_proc = None
     procs = []
+    global XPRA_MANAGED_DISPLAY, XPRA_DAEMONIZED
+
+    # remember whether user explicitly requested a display or asked for 'auto'
+    requested_display = display
+    # pick display if requested (only when 'auto' or empty)
+    if not display or str(display).lower() == "auto":
+        display = pick_free_display()
+
+    # backend selection
     chosen = backend
     if backend == "auto":
-        chosen = "xvfb" if which("Xvfb") else ("xephyr" if which("Xephyr") else None)
-    if chosen is None:
-        raise RuntimeError("Neither Xvfb nor Xephyr found. Install: sudo apt install xvfb xserver-xephyr")
+        if which("xpra"):
+            chosen = "xpra"
+        elif which("Xephyr"):
+            chosen = "xephyr"
+        elif which("Xvfb"):
+            chosen = "xvfb"
+        else:
+            chosen = None
 
+    if chosen is None:
+        raise RuntimeError("Kein virtuelles X Backend gefunden. Installiere xpra, xserver-xephyr oder xvfb.")
+
+    # start chosen backend
     if chosen == "xvfb":
         if not which("Xvfb"):
-            raise RuntimeError("Xvfb not found. Install: sudo apt install xvfb")
-        args = ["Xvfb", display, "-screen", "0", f"{W}x{H}x24", "-nolisten","tcp","-noreset"]
-        procs.append(subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                      preexec_fn=os.setsid))
-    else:
+            raise RuntimeError("Xvfb nicht gefunden. Installiere: sudo apt install xvfb")
+        args = ["Xvfb", display, "-screen", "0", f"{W}x{H}x24", "-nolisten", "tcp", "-noreset"]
+        p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, preexec_fn=os.setsid)
+        virt_proc = p
+        procs.append(p)
+    elif chosen == "xephyr":
         if not which("Xephyr"):
-            raise RuntimeError("Xephyr not found. Install: sudo apt install xserver-xephyr")
-        args = ["Xephyr", display, "-screen", f"{W}x{H}", "-fullscreen", "-resizeable"]
-        procs.append(subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                      preexec_fn=os.setsid))
+            raise RuntimeError("Xephyr nicht gefunden. Installiere: sudo apt install xserver-xephyr")
+        args = ["Xephyr", display, "-screen", f"{W}x{H}", "-resizeable", "-ac"]
+        p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, preexec_fn=os.setsid)
+        virt_proc = p
+        procs.append(p)
+    elif chosen == "xpra":
+        if not which("xpra"):
+            raise RuntimeError("xpra nicht gefunden. Installiere: sudo apt install xpra")
+        # Start xpra server in daemon mode (let xpra manage its own process). We will poll
+        # 'xpra list' to confirm the server is live, then attach a client to show a host window.
+        # if user requested a very low display number (like :2) xpra warns and may conflict
+        try:
+            num = int(str(display).lstrip(":"))
+            # Only auto-repick when user didn't explicitly request a display
+            if num < 20 and (not requested_display or str(requested_display).lower() == "auto"):
+                print(f"⚠️  Requested virtual display {display} is low; picking a safer free display instead.", flush=True)
+                display = pick_free_display()
+        except Exception:
+            pass
 
-    # warte bis X-Socket existiert
-    for _ in range(200):
-        if os.path.exists(f"/tmp/.X11-unix/X{display[1:]}"):
+        server_args = ["xpra", "start", display, "--daemon=yes"]
+        # detect a terminal we can exec into the session later
+        term = None
+        for t in ("xterm","uxterm","x-terminal-emulator","lxterminal","gnome-terminal","konsole"):
+            if which(t):
+                term = t
+                break
+        # run xpra start as a short-lived command (daemonizes) and capture output
+        try:
+            res = subprocess.run(server_args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            print(f"[xpra-server] exitcode={res.returncode}", flush=True)
+            if res.stdout:
+                for ln in res.stdout.splitlines():
+                    print(f"[xpra-server] {ln}", flush=True)
+            # If xpra reports that the display is already active, try once with a
+            # different free display (helps when a stale X lock or previous server
+            # holds the requested low-numbered display like :2).
+            try_retry = False
+            if res.stdout and 'Server is already active for display' in res.stdout:
+                try_retry = True
+            # also inspect per-session log later and set try_retry accordingly
+            # print xpra per-session log (if present) to surface startup errors
+            try:
+                log_path = f"/run/user/{os.getuid()}/xpra/{display}.log"
+                if os.path.exists(log_path):
+                    print(f"[xpra-server] per-session log: {log_path}", flush=True)
+                    with open(log_path, "r", errors="replace") as f:
+                        lines = f.read().splitlines()[-200:]
+                        for l in lines:
+                            print(f"[xpra-server] LOG: {l}", flush=True)
+                        # hint for common failure
+                        if any("dbus-launch failed" in l or "dbus-launch --sh-syntax" in l for l in lines):
+                            print("⚠️  xpra startup: dbus-launch failed in session log. Install 'dbus-x11' or ensure dbus-launch is available.", flush=True)
+            except Exception:
+                pass
+            # Check if xpra registered the display
+            try:
+                xl = run_ok(["xpra","list"]).stdout
+                print(f"[xpra-server] xpra list:\n{xl}", flush=True)
+            except Exception:
+                xl = ""
+            if display in xl:
+                # daemonized start succeeded
+                XPRA_MANAGED_DISPLAY = display
+                XPRA_DAEMONIZED = True
+                # if we found a terminal candidate, try to exec it inside the xpra session
+                if term:
+                    try:
+                        # Some xpra versions don't provide 'exec'. Start the terminal directly
+                        # in the xpra-managed DISPLAY by setting DISPLAY in the env. This
+                        # creates a regular X client inside the virtual display and avoids
+                        # depending on a non-existent 'xpra exec' subcommand.
+                        env = os.environ.copy()
+                        env["DISPLAY"] = display
+                        pterm = subprocess.Popen([term], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, preexec_fn=os.setsid)
+                        procs.append(pterm)
+                        print(f"[xpra-server] started {term} inside {display}", flush=True)
+                    except Exception as e:
+                        print(f"[xpra-server] failed to start {term} inside {display}: {e}", flush=True)
+            else:
+                # fallback: start xpra in foreground so we can see logs and keep it alive
+                # If we detected the 'already active' message, attempt one retry on a
+                # safer free display before falling back to foreground.
+                if try_retry:
+                    try:
+                        old = display
+                        display = pick_free_display()
+                        print(f"[xpra-server] requested display {old} already active — retrying with {display}", flush=True)
+                        server_args = ["xpra", "start", display, "--daemon=yes"]
+                        res = subprocess.run(server_args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                        print(f"[xpra-server] retry exitcode={res.returncode}", flush=True)
+                        if res.stdout:
+                            for ln in res.stdout.splitlines():
+                                print(f"[xpra-server] {ln}", flush=True)
+                        try:
+                            xl = run_ok(["xpra","list"]).stdout
+                            print(f"[xpra-server] xpra list after retry:\n{xl}", flush=True)
+                        except Exception:
+                            xl = ""
+                        if display in xl:
+                            XPRA_MANAGED_DISPLAY = display
+                            XPRA_DAEMONIZED = True
+                    except Exception:
+                        pass
+
+                fallback_args = ["xpra", "start", display, "--no-daemon"]
+                print("[xpra-server] daemon start didn't register display, falling back to foreground start", flush=True)
+                p = subprocess.Popen(fallback_args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, preexec_fn=os.setsid)
+                virt_proc = p
+                procs.append(p)
+                # forward server output
+                def _forward_server_output2(pipe):
+                    try:
+                        for ln in iter(pipe.readline, b""):
+                            if not ln:
+                                break
+                            try:
+                                s = ln.decode("utf-8", errors="replace").rstrip()
+                            except Exception:
+                                s = str(ln)
+                            print(f"[xpra-server] {s}", flush=True)
+                    except Exception:
+                        pass
+                    try: pipe.close()
+                    except Exception: pass
+                threading.Thread(target=_forward_server_output2, args=(p.stdout,), daemon=True).start()
+        except Exception as e:
+            print("⚠️  Failed to start xpra server:", e, flush=True)
+            raise
+        # If xpra did not succeed in daemonizing and we have no running virt_proc,
+        # fall back to Xephyr (more reliably creates a visible host window)
+        if chosen == "xpra" and not XPRA_DAEMONIZED and (virt_proc is None or (virt_proc.poll() is not None)):
+            if which("Xephyr"):
+                print("[virtual] xpra failed to provide a live server — falling back to Xephyr.", flush=True)
+                args = ["Xephyr", display, "-screen", f"{W}x{H}", "-resizeable", "-ac"]
+                p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, preexec_fn=os.setsid)
+                virt_proc = p
+                procs.append(p)
+            elif which("Xvfb"):
+                print("[virtual] xpra failed — falling back to Xvfb.", flush=True)
+                args = ["Xvfb", display, "-screen", "0", f"{W}x{H}x24", "-nolisten", "tcp", "-noreset"]
+                p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, preexec_fn=os.setsid)
+                virt_proc = p
+                procs.append(p)
+            else:
+                print("⚠️  xpra failed and no Xephyr/Xvfb found to fallback to.", flush=True)
+    else:
+        raise RuntimeError(f"Unbekanntes virtuelles Backend: {chosen}")
+
+    # Warte auf Display bereit (xdpyinfo bevorzugt). For xpra the unix socket may not exist,
+    # so prefer xdpyinfo; fall back to assuming requested size after timeout.
+    actual = None
+    # wait up to 20s for display to be usable
+    for _ in range(400):
+        try:
+            size = xdpy_size(display)
+            if size:
+                actual = size
+                break
+        except Exception:
+            pass
+        # fallback check for X socket (works for xvfb/xephyr)
+        sock = f"/tmp/.X11-unix/X{display.lstrip(':')}"
+        if os.path.exists(sock):
+            actual = (W, H)
             break
-        time.sleep(0.02)
+        # For xpra-daemonized servers, check 'xpra list' for readiness
+        try:
+            if XPRA_DAEMONIZED:
+                out = run_ok(["xpra","list"]).stdout
+                if display in out:
+                    # xpra server active; try xdpyinfo again next loop
+                    pass
+        except Exception:
+            pass
+        time.sleep(0.05)
+    if actual is None:
+        # timeout → nutze gewünschte Größe
+        actual = (W, H)
 
-    actual = xdpy_size(display) or (W,H)
-
+    # optionaler Window-Manager (z.B. openbox) im virtuellen DISPLAY
     wm_proc = None
     if start_wm:
-        env = os.environ.copy(); env["DISPLAY"] = display
         if which("openbox"):
-            wm_proc = subprocess.Popen(["openbox"], env=env,
-                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                       preexec_fn=os.setsid)
+            env = os.environ.copy()
+            env["DISPLAY"] = display
+            wm_proc = subprocess.Popen(["openbox"], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, preexec_fn=os.setsid)
         else:
-            print("⚠️  Openbox nicht gefunden (sudo apt install openbox). Starte ohne WM.")
+            wm_proc = None
 
-    print(f"DISPLAY_READY={display}")
-    print(f"👉 Run apps in: DISPLAY={display} <app> &")
-    return procs[0], wm_proc, display, actual
+    # Try to locate an XAUTHORITY/Xauthority file xpra may have created so local
+    # clients (ffmpeg, terminals) can authenticate. Common place is /run/user/<uid>/xpra
+    xauth_path = None
+    try:
+        xpra_dir = f"/run/user/{os.getuid()}/xpra"
+        if os.path.isdir(xpra_dir):
+            for fn in os.listdir(xpra_dir):
+                if fn.endswith('.log') or fn == 'run-xpra':
+                    continue
+                # pick files that reference the display name or look like an authority file
+                if display.lstrip(':') in fn or 'Xauthority' in fn or fn.lower().endswith('.auth'):
+                    cand = os.path.join(xpra_dir, fn)
+                    if os.path.isfile(cand) and os.path.getsize(cand) > 0:
+                        xauth_path = cand
+                        break
+    except Exception:
+        xauth_path = None
+
+    # If xpra was chosen, start the local attach client now (so it appears on the host X)
+    if chosen == "xpra":
+        try:
+            host_env = os.environ.copy()
+            # ensure the attach client opens windows on the host display
+            if os.environ.get("DISPLAY"):
+                host_env["DISPLAY"] = os.environ.get("DISPLAY")
+            # If we discovered an XAUTH file, provide it to the attach client
+            if xauth_path:
+                host_env["XAUTHORITY"] = xauth_path
+            attach_args = ["xpra", "attach", display]
+            attach_proc = subprocess.Popen(attach_args, env=host_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, preexec_fn=os.setsid)
+            procs.append(attach_proc)
+            # Forward attach output for debugging (non-blocking thread)
+            def _forward_attach_output(pipe):
+                try:
+                    for ln in iter(pipe.readline, b""):
+                        if not ln:
+                            break
+                        try:
+                            s = ln.decode("utf-8", errors="replace").rstrip()
+                        except Exception:
+                            s = str(ln)
+                        print(f"[xpra-attach] {s}", flush=True)
+                except Exception:
+                    pass
+                try: pipe.close()
+                except Exception: pass
+            threading.Thread(target=_forward_attach_output, args=(attach_proc.stdout,), daemon=True).start()
+        except Exception as e:
+            print("⚠️  xpra attach failed:", e, flush=True)
+            attach_proc = None
+
+    # Gib handles zurück: xpra kann zusätzlich einen attach-proc liefern.
+    return virt_proc, attach_proc, wm_proc, display, actual, xauth_path
 
 # -------------- Latenz Presets --------------
 def latency_flags(latency, hw_codec, gop_frames):
@@ -285,9 +523,13 @@ FF_PROC = None
 VIRT_PROC = None
 WM_PROC = None
 CAST_OBJ = None
+ATTACH_PROC = None
+XPRA_MANAGED_DISPLAY = None
+XPRA_DAEMONIZED = False
 
 def stop_everything():
     global FF_PROC, VIRT_PROC, WM_PROC, CAST_OBJ
+    global ATTACH_PROC
     try:
         if CAST_OBJ:
             try:
@@ -320,11 +562,22 @@ def stop_everything():
         except Exception: 
             try: WM_PROC.terminate()
             except Exception: pass
+    if ATTACH_PROC and ATTACH_PROC.poll() is None:
+        try: os.killpg(os.getpgid(ATTACH_PROC.pid), signal.SIGTERM)
+        except Exception:
+            try: ATTACH_PROC.terminate()
+            except Exception: pass
     if VIRT_PROC and VIRT_PROC.poll() is None:
         try: os.killpg(os.getpgid(VIRT_PROC.pid), signal.SIGTERM)
         except Exception: 
             try: VIRT_PROC.terminate()
             except Exception: pass
+    # If xpra was started in daemon mode, try to stop it explicitly
+    try:
+        if XPRA_DAEMONIZED and XPRA_MANAGED_DISPLAY:
+            subprocess.run(["xpra","stop", XPRA_MANAGED_DISPLAY], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
 
 def sig_handler(signum, frame):
     print(f"--- cleanup (signal {signum}) ---", flush=True)
@@ -357,7 +610,9 @@ def main():
     ap.add_argument("--virtual-res", default="3840x2160")
     ap.add_argument("--virtual-display", default="auto")
     ap.add_argument("--virtual-wm", action="store_true")
-    ap.add_argument("--virtual-backend", default="auto", choices=["auto","xvfb","xephyr"])
+    # default: prefer Xephyr (nested visible X) when present
+    default_backend = "xephyr" if which("Xephyr") else "xpra" if which("xpra") else "auto"
+    ap.add_argument("--virtual-backend", default=default_backend, choices=["auto","xvfb","xephyr","xpra"])
     ap.add_argument("--save-config", action="store_true")
     args = ap.parse_args()
 
@@ -376,13 +631,43 @@ def main():
         # virtuelles Display
         if args.virtual:
             print("Starting virtual display …")
-            VIRT_PROC, WM_PROC, virt_display, actual = start_virtual(
+            VIRT_PROC, ATTACH_PROC, WM_PROC, virt_display, actual, xauth_path = start_virtual(
                 args.virtual_display, args.virtual_res, backend=args.virtual_backend, start_wm=args.virtual_wm)
             reqW,reqH = map(int, args.virtual_res.split("x"))
             actW,actH = actual
             if (actW,actH) != (reqW,reqH):
-                print(f"⚠️  Adjusting capture size from {reqW}x{reqH} → {actW}x{actH} to fit display {virt_display}")
-            used_size = f"{actW}x{actH}"
+                # If the virtual display reports a different size, don't automatically
+                # increase the capture resolution beyond what the user requested —
+                # that can cause excessive CPU/GPU and network load. Prefer to cap
+                # the capture to the requested resolution.
+                cappedW = min(actW, reqW)
+                cappedH = min(actH, reqH)
+                print(f"⚠️  Adjusting capture size from {reqW}x{reqH} → reported {actW}x{actH}; using capped {cappedW}x{cappedH} for capture on {virt_display}")
+                used_size = f"{cappedW}x{cappedH}"
+            else:
+                used_size = f"{actW}x{actH}"
+
+        # If xpra was requested, wait briefly for xpra to register the display so
+        # the local attach client (host window) can connect. This avoids starting
+        # FFmpeg before xpra is ready (which causes attach to fail and no host
+        # window to appear). Timeout after ~15s and proceed.
+        if args.virtual and args.virtual_backend in ("xpra", "auto") and which("xpra"):
+            wait_display = virt_display
+            waited = 0
+            found = False
+            while waited < 15:
+                try:
+                    out = run_ok(["xpra","list"]).stdout
+                    if wait_display in out:
+                        found = True
+                        break
+                except Exception:
+                    pass
+                time.sleep(0.5); waited += 0.5
+            if found:
+                print(f"[xpra] display {wait_display} registered after {waited:.1f}s", flush=True)
+            else:
+                print(f"⚠️  xpra display {wait_display} not registered after {waited:.1f}s — continuing startup", flush=True)
 
         # FFmpeg Server
         ff_cmd = build_ffmpeg_cmd(virt_display if args.virtual else args.display,
@@ -390,7 +675,11 @@ def main():
                                   args.port, args.fflog, args.sink_name, args.latency)
         print("Starting FFmpeg …")
         print("$", shlex_join(ff_cmd))
-        FF_PROC = subprocess.Popen(ff_cmd, preexec_fn=os.setsid)
+        # Provide XAUTHORITY to FFmpeg and other spawned clients if xpra created one
+        ff_env = os.environ.copy()
+        if args.virtual and 'xauth_path' in locals() and xauth_path:
+            ff_env['XAUTHORITY'] = xauth_path
+        FF_PROC = subprocess.Popen(ff_cmd, env=ff_env, preexec_fn=os.setsid)
 
         # Chromecast finden
         print("Discovering Chromecast …")

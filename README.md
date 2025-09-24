@@ -1,6 +1,8 @@
 # Chromecast Receiver & Desktop Streamer
 
-> Streamt deinen Linux-Desktop **direkt** auf einen Chromecast – wahlweise sofort (**direct**) oder erst nach Klick im Receiver-UI (**wait**).
+> Streamt deinen Linux-Desktop **direkt** auf  Chromecast
+> Modus (**direct**):Bildschirm gespiegelt
+> Modus (**wait**): Läd ein Webinterface auf dem Receiver.
 
 [![Developer Setup Guide](https://img.shields.io/badge/Docs-Developer%20Setup%20Guide-0A84FF?logo=google-chrome&logoColor=white)](./docs/DEV_SETUP.md)
 ![Status](https://img.shields.io/badge/OS-Pop!_OS%20%7C%20Ubuntu-blue)
@@ -8,18 +10,18 @@
 ![Python](https://img.shields.io/badge/Python-3.8%2B-informational)
 ![pychromecast](https://img.shields.io/badge/pychromecast-OK-success)
 
-<img alt="splash" src="./splash-0.1.png" width="520">
+<img alt="splash" src="./gui.png" width="520">
 
 ---
 
 ## ✨ Features
 
 - **Ein Tool** (`python/cast_stream.py`) für beide Modi:
-  - **direct**: startet sofort (empfohlen)
+  - **direct**: startet sofort
   - **wait**: zeigt zuerst deine `receiver.html` (Intro/Buttons), Stream beginnt nach „Stream“-Klick
 - **Auto-Encoder** (VAAPI / NVENC / QSV) mit Fallback auf Software (x264)
-- **Volle Kontrolle via Flags** (Auflösung, FPS, Port, Gerät, Loglevel, …)
-- **GUI inklusive** (`python/cast_gui.py`) – Start/Stop per Klick
+- **Kontrolle via Flags** (Auflösung, FPS, Port, Gerät, Loglevel, …)
+- **GUI inklusive** (`python/cast_gui.py`) – Start/Stop
 - **Sauberes Cleanup**: Receiver beenden, FFmpeg stoppen, PulseAudio zurücksetzen
 
 > 🔧 **Developer Setup Guide:** siehe [docs/DEV_SETUP.md](./docs/DEV_SETUP.md)
