@@ -34,14 +34,14 @@
 chromecast-receiver/
 ├─ LICENSE
 ├─ README.md
-├─ receiver.html          # dein Custom Receiver (CAF)
+├─ receiver.html          # Receiver-UI (CAF-Webpage)
 ├─ splash-0.1.png
 ├─ python/
-│  ├─ cast_stream.py      # EIN Streaming-Tool (CLI)
-│  └─ cast_gui.py         # kleines GUI (Start/Stop)
+│  ├─ cast_stream.py      # Streaming-Tool (CLI)
+│  └─ cast_gui.py         # GUI (Start/Stop)
 └─ scripts/
-   ├─ install.sh          # Installer für Pop!_OS/Ubuntu
-   └─ uninstall.sh        # Uninstaller (entfernt alles wieder)
+   ├─ install.sh          # Installer für Linux
+   └─ uninstall.sh        # Uninstaller
 ```
 
 ---
@@ -59,7 +59,7 @@ Danach:
 - **Anwendungsmenü → „Chromecast Streamer“** (GUI), oder
 - Terminal: `chromecast-streamer`
 
-> Der Installer legt alles unter `~/.local/share/chromecast-receiver` ab, erstellt ein virtuelles Python-Env und einen Menüeintrag.
+> Der Installer legt die Daten unter `~/.local/share/chromecast-receiver` ab, erstellt ein virtuelles Python-Env und einen Menüeintrag.
 
 ---
 
@@ -84,27 +84,27 @@ python3 python/cast_stream.py --mode direct   --app-id 22B2DA66   --resolution 1
 
 ```bash
 # per Name (Substring)
-python3 python/cast_stream.py --mode direct --device "Der Professor"
+python3 python/cast_stream.py --mode direct --device "DeviceName"
 
 # per IP
 python3 python/cast_stream.py --mode direct --ip 192.168.178.167
 ```
 
-> **Hinweis:** `--app-id` ist deine **Custom Receiver App ID** aus der Cast Developer Console.
+> **Hinweis:** `--app-id` ist die **Custom Receiver App ID** aus der Cast Developer Console.
 
 ---
 
 ## 🕹️ CLI-Nutzung (Modus: wait)
 
-Zeigt zuerst dein Receiver-UI auf dem TV; der Stream startet **erst nach Knopfdruck** in `receiver.html`:
+Zeigt zuerst das Receiver-UI auf dem TV; der Stream startet **erst nach Knopfdruck über deas Fernseher-Remote** in `receiver.html`:
 
 ```bash
 python3 python/cast_stream.py --mode wait   --app-id 22B2DA66   --ns "urn:x-cast:com.example.stream"
 ```
 
-**Receiver-Button-Event (wichtiger Fix):**
+**Receiver-Button-Event:**
 
-In `receiver.html` sollte der Stream-Button **broadcasten**:
+In `receiver.html` wird der Stream-Button weitergeleitet, wenn gedrückt:
 
 ```js
 // statt bus.send({type:'start'})
